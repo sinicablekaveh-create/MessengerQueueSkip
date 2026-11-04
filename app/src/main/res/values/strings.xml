@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+<string name="queue_service_description">Automates a user-approved queue within installed messenger apps by interacting with their visible screens. Turn it off in Accessibility settings to stop screen access.</string>
+</resources>
