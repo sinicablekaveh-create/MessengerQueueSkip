@@ -69,16 +69,18 @@ final class QueueDb {
     }
     static synchronized String summary(Context c) {
         JSONArray a=items(c);
-        int pending=0,submitted=0,skipped=0;
+        int pending=0,submitted=0,skipped=0,review=0;
         for(int i=0;i<a.length();i++) {
             JSONObject o=a.optJSONObject(i);
             String s=o==null?"":o.optString("status");
             if("pending".equals(s))pending++;
             else if("submitted".equals(s))submitted++;
+            else if("review".equals(s))review++;
             else skipped++;
         }
         return "Total: " + a.length() + "  |  Pending: " + pending +
-                "  |  Submitted: " + submitted + "  |  Skipped: " + skipped;
+                "  |  UI confirmed: " + submitted + "  |  Skipped: " + skipped +
+                "  |  REVIEW: " + review;
     }
     static synchronized void clear(Context c) {
         save(c,new JSONArray());

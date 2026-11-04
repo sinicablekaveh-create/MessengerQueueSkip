@@ -110,7 +110,8 @@ public class MainActivity extends Activity {
         root.addView(addContacts);
 
         space(root,6);
-        addButton(root,"▶  START AUTOMATIC",0xFF00A768,()->start());
+        addButton(root,"▶  TEST ONE CONTACT",0xFF285C96,()->start(true));
+        addButton(root,"▶  START AUTOMATIC",0xFF00A768,()->start(false));
         addButton(root,"Ⅱ  PAUSE / RESUME",0xFFF1B950,()-> {
             QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
             if(s==null){toast("Enable the accessibility service first");return;}
@@ -138,10 +139,17 @@ public class MainActivity extends Activity {
         logs.setPadding(dp(12),dp(12),dp(12),dp(12));
         logs.setBackground(bg(0xFF19283D,10));
         root.addView(logs);
-        root.addView(label("Submitted = Send UI action attempted. It does not prove delivery. For reliable identification, the target number or the unique MQS contact alias must be visible.",12,0xFFAEBCD0,false));
+        addButton(root,"COPY LOG FOR DIAGNOSIS",0xFF405F80,()->{
+            android.content.ClipboardManager clipboard=(android.content.ClipboardManager)
+                    getSystemService(CLIPBOARD_SERVICE);
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MQS log",
+                    QueueDb.get(this,"logs","")));
+            toast("Queue log copied. It may contain phone numbers.");
+        });
+        root.addView(label("UI confirmed = outgoing message appeared on screen and the composer was cleared. It does NOT prove server delivery. REVIEW means the queue stopped to prevent duplicate sending.",12,0xFFAEBCD0,false));
         refresh();
     }
-    private void start() {
+    private void start(boolean testOne) {
         if(!approved.isChecked()) {toast("Confirm recipients' consent first");return;}
         if(QueueDb.next(this)<0) {toast("Import contacts with pending status first");return;}
         if(message.getText().toString().trim().isEmpty()){toast("Enter the message text");return;}
@@ -166,8 +174,9 @@ public class MainActivity extends Activity {
         QueueDb.put(this,"delay",String.valueOf(d));
         QueueDb.put(this,"primary",NAMES[primary.getSelectedItemPosition()]);
         QueueDb.put(this,"fallback",FALLBACK[fallback.getSelectedItemPosition()]);
+        QueueDb.put(this,"testOne",testOne?"1":"0");
         s.startQueue();
-        toast("Automatic queue started");refresh();
+        toast(testOne?"Single-contact test started":"Automatic queue started");refresh();
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
         super.onActivityResult(requestCode,resultCode,data);

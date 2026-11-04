@@ -31,6 +31,9 @@ public class QueueAccessibilityService extends AccessibilityService {
     private long launchedAt=0,lastActionAt=0;
     private String phone="",targetName="",targetPackage="",message="",contactAlias="";
     private boolean triedAlias=false,newChatTapped=false,sendInProgress=false;
+    private boolean waitingForNext=false,stepScheduled=false,awaitingResult=false,testOne=false;
+    private int processed=0,bubblesBefore=0;
+    private long sendActionAt=0,nextDueAt=0;
     private long searchStartedAt=0;
     private Runnable scheduled;
 
@@ -54,10 +57,12 @@ public class QueueAccessibilityService extends AccessibilityService {
         }
     }
     synchronized void startQueue() {
-        if(running && paused) {paused=false;schedule(200);return;}
+        if(running && paused) {togglePause();return;}
         if(running)return;
         running=true;
         paused=false;
+        processed=0;
+        testOne="1".equals(QueueDb.get(this,"testOne","0"));
         message=QueueDb.get(this,"message","");
         QueueDb.log(this,"START AUTOMATIC");
         next(1000);
@@ -66,13 +71,19 @@ public class QueueAccessibilityService extends AccessibilityService {
         if(!running) {startQueue();return;}
         paused=!paused;
         QueueDb.log(this,paused?"Queue paused":"Queue resumed");
-        if(!paused)schedule(300);
+        if(!paused) {
+            if(waitingForNext) {
+                long remaining=Math.max(0,nextDueAt-android.os.SystemClock.elapsedRealtime());
+                next(remaining);
+            } else schedule(300);
+        }
     }
     synchronized void stopQueue() {
         running=false;
         paused=false;
         generation++;
         if(scheduled!=null)handler.removeCallbacks(scheduled);
+        waitingForNext=false;
         QueueDb.log(this,"Queue stopped by user");
     }
     String state() {
@@ -80,11 +91,20 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
     private void next(long delay) {
         if(!running||paused)return;
+        if(testOne && processed>=1) {
+            running=false;
+            waitingForNext=false;
+            QueueDb.log(this,"TEST ONE FINISHED: check results before starting the full queue");
+            return;
+        }
+        waitingForNext=true;
+        nextDueAt=android.os.SystemClock.elapsedRealtime()+Math.max(0,delay);
         generation++;
         if(scheduled!=null)handler.removeCallbacks(scheduled);
         int token=generation;
         scheduled=()->{
             if(token!=generation||!running||paused)return;
+            waitingForNext=false;
             rowIndex=QueueDb.next(this);
             if(rowIndex<0){running=false;QueueDb.log(this,"Queue complete");return;}
             phone=QueueDb.phone(this,rowIndex);
@@ -105,6 +125,7 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
     private void launchCurrent() {
         if(!running||paused)return;
+        generation++; // invalidate callbacks from the previous messenger attempt
         targetName=attempt==0?QueueDb.get(this,"primary","Bale"):
                 QueueDb.get(this,"fallback","None");
         targetPackage=packageFor(targetName);
@@ -115,6 +136,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         triedAlias=false;
         newChatTapped=false;
         sendInProgress=false;
+        awaitingResult=false;
         contactAlias="1".equals(QueueDb.get(this,"addContacts","0"))
                 ? ContactBridge.ensure(this,phone):"";
         launchedAt=System.currentTimeMillis();
@@ -139,9 +161,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
     private synchronized void failAttempt(String reason) {
         if(!running)return;
-        if(sendInProgress) {
-            QueueDb.log(this,"Send may have been pressed; no automatic retry to prevent duplicates");
-            finishSubmitted("UI confirmation unavailable");
+        if(sendInProgress || awaitingResult) {
+            markReview("Could not confirm Send on screen: " + reason);
             return;
         }
         QueueDb.log(this,"Attempt failed: " + reason);
@@ -149,13 +170,16 @@ public class QueueAccessibilityService extends AccessibilityService {
         String primary=QueueDb.get(this,"primary","Bale");
         if(attempt==0 && !"None".equals(fallback) && !fallback.equals(primary)) {
             attempt=1;
-            handler.postDelayed(this::launchCurrent,900);
+            generation++;
+            int token=generation;
+            handler.postDelayed(()->{if(running && !paused && token==generation) launchCurrent();},900);
         } else skip("No compatible chat / Skip");
     }
     private synchronized void skip(String why) {
         if(rowIndex<0)return;
         QueueDb.status(this,rowIndex,"skipped");
         QueueDb.log(this,"SKIP " + phone + ": " + why);
+        processed++;
         next(delayMs());
     }
     private long delayMs() {
@@ -165,13 +189,16 @@ public class QueueAccessibilityService extends AccessibilityService {
         return Math.max(1,Math.min(1440,d))*60000L;
     }
     private void schedule(long ms) {
+        if(stepScheduled || waitingForNext || !running || paused)return;
+        stepScheduled=true;
         int token=generation;
         handler.postDelayed(()->{
-            if(token==generation&&running&&!paused)step();
+            stepScheduled=false;
+            if(token==generation&&running&&!paused&&!waitingForNext)step();
         },ms);
     }
     private void step() {
-        if(!running||paused)return;
+        if(!running||paused||waitingForNext)return;
         long now=System.currentTimeMillis();
         if(now-launchedAt>ATTEMPT_TIMEOUT_MS) {failAttempt("Timed out waiting for verified chat");return;}
         if(now-lastActionAt<STEP_WAIT_MS) {schedule(STEP_WAIT_MS);return;}
@@ -231,8 +258,22 @@ public class QueueAccessibilityService extends AccessibilityService {
                         ? "" : composer.getText())) {
                     AccessibilityNodeInfo send=findSendNearComposer(root,composer);
                     if(send!=null) {
+                        bubblesBefore=countVisibleMessage(root,message);
                         sendInProgress=true;
                         clickSend(send);
+                        return;
+                    }
+                }
+            } else if(stage==5) {
+                if(now-sendActionAt>=1500) {
+                    AccessibilityNodeInfo editor=findChatComposer(root);
+                    String draft=editor==null||editor.getText()==null?"":editor.getText().toString();
+                    if(draft.trim().isEmpty() && countVisibleMessage(root,message)>bubblesBefore) {
+                        finishSubmitted("UI composer cleared and message bubble visible");
+                        return;
+                    }
+                    if(now-sendActionAt>9000) {
+                        markReview("Send action occurred but message bubble could not be verified");
                         return;
                     }
                 }
@@ -245,7 +286,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void clickSend(AccessibilityNodeInfo target) {
         if(target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            finishSubmitted("Send button tapped via Accessibility action");
+            beginVerification();
             return;
         }
         Rect r=new Rect();target.getBoundsInScreen(r);
@@ -258,7 +299,7 @@ public class QueueAccessibilityService extends AccessibilityService {
                     new GestureDescription.Builder().addStroke(stroke).build(),
                     new GestureResultCallback() {
                         @Override public void onCompleted(GestureDescription g) {
-                            finishSubmitted("Send touch gesture completed; delivery not confirmed");
+                            beginVerification();
                         }
                         @Override public void onCancelled(GestureDescription g) {
                             sendInProgress=false;
@@ -271,11 +312,41 @@ public class QueueAccessibilityService extends AccessibilityService {
             QueueDb.log(this,"Send gesture failed: "+ex.getClass().getSimpleName());
         }
     }
+    private void beginVerification() {
+        stage=5;
+        sendActionAt=System.currentTimeMillis();
+        awaitingResult=true;
+        QueueDb.log(this,"Send action invoked; verifying chat UI...");
+        schedule(1100);
+    }
+    private int countVisibleMessage(AccessibilityNodeInfo root,String target) {
+        List<AccessibilityNodeInfo> nodes=new ArrayList<>();
+        collect(root,nodes,0,40);
+        int count=0;
+        for(AccessibilityNodeInfo node:nodes) {
+            if(node.isEditable()||!node.isVisibleToUser())continue;
+            String txt=node.getText()==null?"":node.getText().toString();
+            if(target.equals(txt))count++;
+        }
+        return count;
+    }
+    private synchronized void markReview(String reason) {
+        if(!running || rowIndex<0)return;
+        QueueDb.status(this,rowIndex,"review");
+        QueueDb.log(this,"REVIEW REQUIRED "+phone+" via "+targetName+": "+reason);
+        sendInProgress=false;
+        awaitingResult=false;
+        running=false;
+        paused=false;
+        generation++;
+    }
     private synchronized void finishSubmitted(String detail) {
         if(!running || rowIndex<0)return;
         QueueDb.status(this,rowIndex,"submitted");
         QueueDb.log(this,"SUBMITTED "+phone+" via "+targetName+" ("+detail+")");
         sendInProgress=false;
+        awaitingResult=false;
+        processed++;
         next(delayMs());
     }
 
@@ -302,7 +373,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private AccessibilityNodeInfo findVerifiedResult(AccessibilityNodeInfo root,
             String expectedPhone,String expectedAlias) {
-        String digits=expectedPhone.replaceAll("[^0-9]","");
+        String digits=onlyDigits(expectedPhone);
         if(digits.length()<10)return null;
         String last10=digits.substring(digits.length()-10);
         AccessibilityNodeInfo search=findSearchEditor(root);
@@ -318,7 +389,7 @@ public class QueueAccessibilityService extends AccessibilityService {
             Rect b=new Rect();n.getBoundsInScreen(b);
             if(b.isEmpty() || b.top<minY)continue;
             String label=str(n.getText())+" "+str(n.getContentDescription());
-            String normalized=label.replaceAll("[^0-9]","");
+            String normalized=onlyDigits(label);
             // Never choose a look-alike name: require the actual phone suffix
             // or the tagged MQS phone contact we created with permission.
             if(normalized.contains(last10) ||
@@ -342,7 +413,7 @@ public class QueueAccessibilityService extends AccessibilityService {
                     " "+str(n.getViewIdResourceName());
             if(info.contains("search") || info.contains("جست"))continue;
             Rect r=new Rect();n.getBoundsInScreen(r);
-            if(r.isEmpty() || r.centerY()<screenHeight*0.48)continue;
+            if(r.isEmpty() || r.centerY()<screenHeight*0.35)continue;
             if(r.centerY()>maxY) {best=n;maxY=r.centerY();}
         }
         return best;
@@ -365,7 +436,8 @@ public class QueueAccessibilityService extends AccessibilityService {
                     desc.equals("ارسال")||desc.equals("ارسال پیام");
             boolean resource=id.endsWith("/send")||id.endsWith("/send_button")||
                     id.endsWith("/btn_send")||id.endsWith("/ic_send")||
-                    id.endsWith("/chat_send");
+                    id.endsWith("/chat_send") ||
+                    (id.contains("send") && !id.contains("resend") && !id.contains("send_as"));
             if(!label && !resource)continue;
             Rect r=new Rect();n.getBoundsInScreen(r);
             if(r.isEmpty() || Math.abs(r.centerY()-editor.centerY())>250)continue;
@@ -420,6 +492,16 @@ public class QueueAccessibilityService extends AccessibilityService {
             }
         }
         return null;
+    }
+    private static String onlyDigits(String s) {
+        StringBuilder out=new StringBuilder();
+        for(int i=0;i<s.length();i++) {
+            char c=s.charAt(i);
+            if(c>='۰' && c<='۹')c=(char)('0'+c-'۰');
+            else if(c>='٠' && c<='٩')c=(char)('0'+c-'٠');
+            if(c>='0' && c<='9')out.append(c);
+        }
+        return out.toString();
     }
     private void collect(AccessibilityNodeInfo root,List<AccessibilityNodeInfo> out,int depth,int maxDepth) {
         if(root==null||depth>maxDepth||out.size()>500)return;
