@@ -24,12 +24,14 @@ public class QueueAccessibilityService extends AccessibilityService {
     static volatile QueueAccessibilityService INSTANCE;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private static final long STEP_WAIT_MS=850;
-    private static final long ATTEMPT_TIMEOUT_MS=25000;
+    private static final long ATTEMPT_TIMEOUT_MS=60000;
     private volatile boolean running=false;
     private volatile boolean paused=false;
     private int rowIndex=-1,attempt=0,stage=0,generation=0;
     private long launchedAt=0,lastActionAt=0;
-    private String phone="",targetName="",targetPackage="",message="";
+    private String phone="",targetName="",targetPackage="",message="",contactAlias="";
+    private boolean triedAlias=false,newChatTapped=false,sendInProgress=false;
+    private long searchStartedAt=0;
     private Runnable scheduled;
 
     @Override protected void onServiceConnected() {
@@ -109,6 +111,12 @@ public class QueueAccessibilityService extends AccessibilityService {
         if(targetPackage.isEmpty()) {skip("No fallback app configured");return;}
         stage=0;
         lastActionAt=0;
+        searchStartedAt=0;
+        triedAlias=false;
+        newChatTapped=false;
+        sendInProgress=false;
+        contactAlias="1".equals(QueueDb.get(this,"addContacts","0"))
+                ? ContactBridge.ensure(this,phone):"";
         launchedAt=System.currentTimeMillis();
         QueueDb.log(this,"Attempt " + (attempt+1) + " " + targetName + " -> " + phone);
         try {
@@ -131,6 +139,11 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
     private synchronized void failAttempt(String reason) {
         if(!running)return;
+        if(sendInProgress) {
+            QueueDb.log(this,"Send may have been pressed; no automatic retry to prevent duplicates");
+            finishSubmitted("UI confirmation unavailable");
+            return;
+        }
         QueueDb.log(this,"Attempt failed: " + reason);
         String fallback=QueueDb.get(this,"fallback","None");
         String primary=QueueDb.get(this,"primary","Bale");
@@ -140,6 +153,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         } else skip("No compatible chat / Skip");
     }
     private synchronized void skip(String why) {
+        if(rowIndex<0)return;
         QueueDb.status(this,rowIndex,"skipped");
         QueueDb.log(this,"SKIP " + phone + ": " + why);
         next(delayMs());
@@ -159,42 +173,210 @@ public class QueueAccessibilityService extends AccessibilityService {
     private void step() {
         if(!running||paused)return;
         long now=System.currentTimeMillis();
-        if(now-launchedAt>ATTEMPT_TIMEOUT_MS) {failAttempt("Timed out waiting for matching UI");return;}
+        if(now-launchedAt>ATTEMPT_TIMEOUT_MS) {failAttempt("Timed out waiting for verified chat");return;}
         if(now-lastActionAt<STEP_WAIT_MS) {schedule(STEP_WAIT_MS);return;}
         AccessibilityNodeInfo root=getRootInActiveWindow();
-        if(root==null){schedule(1200);return;}
+        if(root==null){schedule(1000);return;}
         try {
-            String active=String.valueOf(root.getPackageName());
-            if(!active.equals(targetPackage)) {schedule(900);return;}
-            if(stage==0) { // Find the app's own search control.
-                AccessibilityNodeInfo search=findByWords(root,new String[]{"search","جستجو","جست و جو"},true);
-                if(search!=null&&click(search)) {stage=1;lastActionAt=now;schedule(950);return;}
-                AccessibilityNodeInfo edit=findEditable(root,true);
-                if(edit!=null){stage=1;schedule(350);return;}
-            } else if(stage==1) { // Search contacts for the exact number.
-                AccessibilityNodeInfo edit=findEditable(root,false);
-                if(edit!=null && setText(edit,phone)) {
-                    stage=2;lastActionAt=now;schedule(1650);return;
+            if(!targetPackage.equals(String.valueOf(root.getPackageName()))) {
+                schedule(900);return;
+            }
+            if(stage==0) {
+                AccessibilityNodeInfo search=findByWords(root,
+                        new String[]{"search","جستجو","جست و جو","search_icon","search_button","ic_search"},true);
+                if(search!=null && click(search)) {
+                    stage=1;lastActionAt=now;schedule(800);return;
                 }
-            } else if(stage==2) { // Only select a result displaying the intended phone.
-                AccessibilityNodeInfo match=findNumberResult(root,phone);
-                if(match!=null&&click(match)) {stage=3;lastActionAt=now;schedule(1100);return;}
-            } else if(stage==3) { // Compose message in the matched chat.
-                AccessibilityNodeInfo edit=findEditable(root,false);
-                if(edit!=null && setText(edit,message)) {stage=4;lastActionAt=now;schedule(850);return;}
-            } else if(stage==4) { // Send and mark 'submitted' only after the UI action.
-                AccessibilityNodeInfo button=findByWords(root,
-                   new String[]{"send","ارسال","send message"},true);
-                if(button!=null && click(button)) {
-                    QueueDb.status(this,rowIndex,"submitted");
-                    QueueDb.log(this,"SUBMITTED " + phone + " via " + targetName + " (UI only)");
-                    next(delayMs());return;
+                if(findSearchEditor(root)!=null) {
+                    stage=1;schedule(250);return;
+                }
+                // Some versions hide search inside the 'new chat' or pencil action.
+                if(!newChatTapped) {
+                    AccessibilityNodeInfo newChat=findByWords(root,
+                            new String[]{"new chat","new message","پیام جدید","گفتگوی جدید",
+                                    "گفت و گوی جدید","compose","ic_edit","fab"},true);
+                    if(newChat!=null && click(newChat)) {
+                        newChatTapped=true;lastActionAt=now;schedule(900);return;
+                    }
+                }
+            } else if(stage==1) {
+                AccessibilityNodeInfo input=findSearchEditor(root);
+                String query=triedAlias?contactAlias:phone;
+                if(input!=null && !query.isEmpty() && setText(input,query)) {
+                    stage=2;searchStartedAt=now;lastActionAt=now;schedule(1500);return;
+                }
+            } else if(stage==2) {
+                AccessibilityNodeInfo match=findVerifiedResult(root,phone,
+                        triedAlias?contactAlias:"");
+                if(match!=null && click(match)) {
+                    stage=3;lastActionAt=now;
+                    QueueDb.log(this,"Matched verified contact in "+targetName);
+                    schedule(1100);return;
+                }
+                if(!triedAlias && !contactAlias.isEmpty()
+                        && now-searchStartedAt>9000) {
+                    triedAlias=true;stage=1;
+                    QueueDb.log(this,"Searching synced contact alias in "+targetName);
+                    schedule(300);return;
+                }
+            } else if(stage==3) {
+                AccessibilityNodeInfo composer=findChatComposer(root);
+                if(composer!=null && setText(composer,message)) {
+                    stage=4;lastActionAt=now;schedule(900);return;
+                }
+            } else if(stage==4) {
+                if(sendInProgress)return;
+                AccessibilityNodeInfo composer=findChatComposer(root);
+                if(composer!=null && message.contentEquals(composer.getText()==null
+                        ? "" : composer.getText())) {
+                    AccessibilityNodeInfo send=findSendNearComposer(root,composer);
+                    if(send!=null) {
+                        sendInProgress=true;
+                        clickSend(send);
+                        return;
+                    }
                 }
             }
         } catch(Exception e) {
-            QueueDb.log(this,"UI inspection error: " + e.getClass().getSimpleName());
+            QueueDb.log(this,"UI engine error at step "+stage+": "+e.getClass().getSimpleName());
         } finally {root.recycle();}
         schedule(900);
+    }
+
+    private void clickSend(AccessibilityNodeInfo target) {
+        if(target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            finishSubmitted("Send button tapped via Accessibility action");
+            return;
+        }
+        Rect r=new Rect();target.getBoundsInScreen(r);
+        if(r.isEmpty()) {sendInProgress=false;return;}
+        Path p=new Path();p.moveTo(r.centerX(),r.centerY());
+        GestureDescription.StrokeDescription stroke=
+                new GestureDescription.StrokeDescription(p,0,100);
+        try {
+            boolean initiated=dispatchGesture(
+                    new GestureDescription.Builder().addStroke(stroke).build(),
+                    new GestureResultCallback() {
+                        @Override public void onCompleted(GestureDescription g) {
+                            finishSubmitted("Send touch gesture completed; delivery not confirmed");
+                        }
+                        @Override public void onCancelled(GestureDescription g) {
+                            sendInProgress=false;
+                            QueueDb.log(QueueAccessibilityService.this,"Send gesture cancelled");
+                        }
+                    },handler);
+            if(!initiated)sendInProgress=false;
+        } catch(Exception ex) {
+            sendInProgress=false;
+            QueueDb.log(this,"Send gesture failed: "+ex.getClass().getSimpleName());
+        }
+    }
+    private synchronized void finishSubmitted(String detail) {
+        if(!running || rowIndex<0)return;
+        QueueDb.status(this,rowIndex,"submitted");
+        QueueDb.log(this,"SUBMITTED "+phone+" via "+targetName+" ("+detail+")");
+        sendInProgress=false;
+        next(delayMs());
+    }
+
+    private AccessibilityNodeInfo findSearchEditor(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> nodes=new ArrayList<>();
+        collect(root,nodes,0,40);
+        AccessibilityNodeInfo best=null;
+        int minTop=Integer.MAX_VALUE;
+        int screenHeight=getResources().getDisplayMetrics().heightPixels;
+        for(AccessibilityNodeInfo n:nodes) {
+            if(!n.isEditable() || !n.isEnabled())continue;
+            String info=str(n.getHintText())+" "+str(n.getContentDescription())+
+                    " "+str(n.getViewIdResourceName());
+            Rect r=new Rect();n.getBoundsInScreen(r);
+            if(r.isEmpty())continue;
+            boolean search=info.contains("search")||info.contains("جست")||
+                    info.contains("filter");
+            if(search || r.centerY()<screenHeight*0.38) {
+                if(r.top<minTop){best=n;minTop=r.top;}
+            }
+        }
+        return best;
+    }
+
+    private AccessibilityNodeInfo findVerifiedResult(AccessibilityNodeInfo root,
+            String expectedPhone,String expectedAlias) {
+        String digits=expectedPhone.replaceAll("[^0-9]","");
+        if(digits.length()<10)return null;
+        String last10=digits.substring(digits.length()-10);
+        AccessibilityNodeInfo search=findSearchEditor(root);
+        int minY=0;
+        if(search!=null) {
+            Rect b=new Rect();search.getBoundsInScreen(b);
+            minY=b.bottom+6;
+        }
+        List<AccessibilityNodeInfo> nodes=new ArrayList<>();
+        collect(root,nodes,0,40);
+        for(AccessibilityNodeInfo n:nodes) {
+            if(n.isEditable() || !n.isVisibleToUser())continue;
+            Rect b=new Rect();n.getBoundsInScreen(b);
+            if(b.isEmpty() || b.top<minY)continue;
+            String label=str(n.getText())+" "+str(n.getContentDescription());
+            String normalized=label.replaceAll("[^0-9]","");
+            // Never choose a look-alike name: require the actual phone suffix
+            // or the tagged MQS phone contact we created with permission.
+            if(normalized.contains(last10) ||
+               (!expectedAlias.isEmpty() && label.contains(expectedAlias.toLowerCase(Locale.ROOT)))) {
+                AccessibilityNodeInfo action=clickable(n);
+                if(action!=null && action.isVisibleToUser())return action;
+            }
+        }
+        return null;
+    }
+
+    private AccessibilityNodeInfo findChatComposer(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> nodes=new ArrayList<>();
+        collect(root,nodes,0,40);
+        int screenHeight=getResources().getDisplayMetrics().heightPixels;
+        AccessibilityNodeInfo best=null;
+        int maxY=-1;
+        for(AccessibilityNodeInfo n:nodes) {
+            if(!n.isEditable() || !n.isEnabled() || !n.isVisibleToUser())continue;
+            String info=str(n.getHintText())+" "+str(n.getContentDescription())+
+                    " "+str(n.getViewIdResourceName());
+            if(info.contains("search") || info.contains("جست"))continue;
+            Rect r=new Rect();n.getBoundsInScreen(r);
+            if(r.isEmpty() || r.centerY()<screenHeight*0.48)continue;
+            if(r.centerY()>maxY) {best=n;maxY=r.centerY();}
+        }
+        return best;
+    }
+
+    private AccessibilityNodeInfo findSendNearComposer(AccessibilityNodeInfo root,
+            AccessibilityNodeInfo composer) {
+        Rect editor=new Rect();composer.getBoundsInScreen(editor);
+        List<AccessibilityNodeInfo> nodes=new ArrayList<>();
+        collect(root,nodes,0,40);
+        AccessibilityNodeInfo best=null;
+        long bestDistance=Long.MAX_VALUE;
+        for(AccessibilityNodeInfo n:nodes) {
+            if(n.isEditable() || !n.isEnabled() || !n.isVisibleToUser())continue;
+            String title=str(n.getText()).trim();
+            String desc=str(n.getContentDescription()).trim();
+            String id=str(n.getViewIdResourceName());
+            boolean label=title.equals("send")||title.equals("ارسال")||
+                    desc.equals("send")||desc.equals("send message")||
+                    desc.equals("ارسال")||desc.equals("ارسال پیام");
+            boolean resource=id.endsWith("/send")||id.endsWith("/send_button")||
+                    id.endsWith("/btn_send")||id.endsWith("/ic_send")||
+                    id.endsWith("/chat_send");
+            if(!label && !resource)continue;
+            Rect r=new Rect();n.getBoundsInScreen(r);
+            if(r.isEmpty() || Math.abs(r.centerY()-editor.centerY())>250)continue;
+            // Never use a generic 'send' control far above the chat composer.
+            AccessibilityNodeInfo action=clickable(n);
+            if(action==null)continue;
+            long distance=Math.abs((long)r.centerY()-editor.centerY())+
+                    Math.abs((long)r.centerX()-editor.right)/3;
+            if(distance<bestDistance){best=action;bestDistance=distance;}
+        }
+        return best;
     }
     private static String str(CharSequence c){return c==null?"":c.toString().toLowerCase(Locale.ROOT);}
     private AccessibilityNodeInfo findEditable(AccessibilityNodeInfo parent,boolean searchOnly) {

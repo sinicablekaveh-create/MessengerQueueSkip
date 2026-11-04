@@ -26,13 +26,13 @@ import android.graphics.drawable.GradientDrawable;
 import java.util.List;
 
 public class MainActivity extends Activity {
-    static final String[] NAMES={"Bale","Rubika","Eitaa","Telegram","WhatsApp"};
-    private static final String[] FALLBACK={"None","Bale","Rubika","Eitaa","Telegram","WhatsApp"};
+    static final String[] NAMES={"Bale","Rubika","Eitaa"};
+    private static final String[] FALLBACK={"None","Bale","Rubika","Eitaa"};
     private static final int FILE_PICKER = 512;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private EditText message, delay;
     private Spinner primary, fallback;
-    private CheckBox approved;
+    private CheckBox approved, addContacts;
     private TextView status, logs, access;
     private final Runnable ticker=new Runnable() {
         @Override public void run() {
@@ -74,7 +74,7 @@ public class MainActivity extends Activity {
         status=label("",14,0xFFC7D4E4,true);root.addView(status);
 
         space(root,14);
-        root.addView(label("3  PRIMARY MESSENGER",16,Color.WHITE,true));
+        root.addView(label("3  PRIMARY MESSENGER (BALE / RUBIKA / EITAA)",16,Color.WHITE,true));
         primary=spinner(NAMES);root.addView(primary);
         root.addView(label("FALLBACK IF CHAT COULD NOT BE OPENED",14,0xFFBECEDF,true));
         fallback=spinner(FALLBACK);root.addView(fallback);
@@ -103,6 +103,11 @@ public class MainActivity extends Activity {
         approved.setText("I confirm these recipients agreed to receive this message.");
         approved.setTextColor(0xFFD1DFE9);
         root.addView(approved);
+        addContacts=new CheckBox(this);
+        addContacts.setText("Optional: create uniquely named phone contacts for Bale, Rubika and Eitaa search (requires Contacts permission).");
+        addContacts.setTextColor(0xFFD1DFE9);
+        addContacts.setChecked("1".equals(QueueDb.get(this,"addContacts","0")));
+        root.addView(addContacts);
 
         space(root,6);
         addButton(root,"▶  START AUTOMATIC",0xFF00A768,()->start());
@@ -133,7 +138,7 @@ public class MainActivity extends Activity {
         logs.setPadding(dp(12),dp(12),dp(12),dp(12));
         logs.setBackground(bg(0xFF19283D,10));
         root.addView(logs);
-        root.addView(label("Submitted means the UI send action was tapped. Delivery/read receipt cannot be verified.",12,0xFFAEBCD0,false));
+        root.addView(label("Submitted = Send UI action attempted. It does not prove delivery. For reliable identification, the target number or the unique MQS contact alias must be visible.",12,0xFFAEBCD0,false));
         refresh();
     }
     private void start() {
@@ -144,6 +149,13 @@ public class MainActivity extends Activity {
         try {d=Integer.parseInt(delay.getText().toString().trim());}
         catch(Exception e){toast("Delay must be 1 to 1440 minutes");return;}
         if(d<1||d>1440) {toast("Delay must be 1 to 1440 minutes");return;}
+        if(addContacts.isChecked() && !ContactBridge.permission(this)) {
+            requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS,
+                    android.Manifest.permission.WRITE_CONTACTS}, 532);
+            toast("Allow Contacts access and press START again");
+            return;
+        }
+        QueueDb.put(this,"addContacts",addContacts.isChecked()?"1":"0");
         QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
         if(s==null) {
             toast("Enable Messenger Queue Skip in Accessibility settings");
