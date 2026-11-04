@@ -46,6 +46,23 @@ final class QueueDb {
         log(c,"Imported " + added + " unique contacts");
         return added;
     }
+    /** Interrupted attempts are not automatically retried: the send may have occurred. */
+    static synchronized int recoverInterrupted(Context c) {
+        JSONArray a=items(c);
+        int count=0;
+        for(int i=0;i<a.length();i++) {
+            JSONObject v=a.optJSONObject(i);
+            if(v!=null && "in_flight".equals(v.optString("status"))) {
+                try {v.put("status","review");count++;}
+                catch(Exception ignored) {}
+            }
+        }
+        if(count>0) {
+            save(c,a);
+            log(c,"Recovered "+count+" interrupted attempt(s) as REVIEW, no duplicate sending");
+        }
+        return count;
+    }
     static synchronized int next(Context c) {
         JSONArray a = items(c);
         for(int i=0;i<a.length();i++) {
@@ -58,6 +75,10 @@ final class QueueDb {
         JSONObject v = items(c).optJSONObject(idx);
         return v == null ? "" : v.optString("phone");
     }
+    static synchronized String state(Context c, int index) {
+        JSONObject v=items(c).optJSONObject(index);
+        return v==null?"":v.optString("status");
+    }
     static synchronized void status(Context c, int index, String state) {
         JSONArray a=items(c);
         JSONObject v=a.optJSONObject(index);
@@ -69,18 +90,19 @@ final class QueueDb {
     }
     static synchronized String summary(Context c) {
         JSONArray a=items(c);
-        int pending=0,submitted=0,skipped=0,review=0;
+        int pending=0,submitted=0,skipped=0,review=0,inFlight=0;
         for(int i=0;i<a.length();i++) {
             JSONObject o=a.optJSONObject(i);
             String s=o==null?"":o.optString("status");
             if("pending".equals(s))pending++;
             else if("submitted".equals(s))submitted++;
             else if("review".equals(s))review++;
+            else if("in_flight".equals(s))inFlight++;
             else skipped++;
         }
         return "Total: " + a.length() + "  |  Pending: " + pending +
                 "  |  UI confirmed: " + submitted + "  |  Skipped: " + skipped +
-                "  |  REVIEW: " + review;
+                "  |  REVIEW: " + review + "  |  Active: " + inFlight;
     }
     static synchronized void clear(Context c) {
         save(c,new JSONArray());

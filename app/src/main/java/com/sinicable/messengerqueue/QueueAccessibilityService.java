@@ -11,6 +11,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -35,6 +36,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     private int processed=0,bubblesBefore=0;
     private long sendActionAt=0,nextDueAt=0;
     private long searchStartedAt=0;
+    private long pausedAt=0;
+    private volatile boolean diagnosticMode=false;
     private Runnable scheduled;
 
     @Override protected void onServiceConnected() {
@@ -62,6 +65,8 @@ public class QueueAccessibilityService extends AccessibilityService {
         running=true;
         paused=false;
         processed=0;
+        diagnosticMode=false;
+        QueueDb.recoverInterrupted(this);
         testOne="1".equals(QueueDb.get(this,"testOne","0"));
         message=QueueDb.get(this,"message","");
         QueueDb.log(this,"START AUTOMATIC");
@@ -70,6 +75,17 @@ public class QueueAccessibilityService extends AccessibilityService {
     synchronized void togglePause() {
         if(!running) {startQueue();return;}
         paused=!paused;
+        long clock=System.currentTimeMillis();
+        if(paused) {
+            pausedAt=clock;
+        } else if(pausedAt>0) {
+            long duration=Math.max(0,clock-pausedAt);
+            launchedAt+=duration;
+            if(searchStartedAt>0)searchStartedAt+=duration;
+            if(sendActionAt>0)sendActionAt+=duration;
+            nextDueAt+=duration;
+            pausedAt=0;
+        }
         QueueDb.log(this,paused?"Queue paused":"Queue resumed");
         if(!paused) {
             if(waitingForNext) {
@@ -79,10 +95,21 @@ public class QueueAccessibilityService extends AccessibilityService {
         }
     }
     synchronized void stopQueue() {
+        boolean wasRunning=running;
         running=false;
         paused=false;
         generation++;
         if(scheduled!=null)handler.removeCallbacks(scheduled);
+        if(wasRunning && rowIndex>=0 && !waitingForNext &&
+                "in_flight".equals(QueueDb.state(this,rowIndex))) {
+            if(stage<4 && !sendInProgress && !awaitingResult) {
+                QueueDb.status(this,rowIndex,"pending");
+                QueueDb.log(this,"Current attempt safely returned to Pending");
+            } else {
+                QueueDb.status(this,rowIndex,"review");
+                QueueDb.log(this,"Current attempt marked REVIEW to prevent duplicate send");
+            }
+        }
         waitingForNext=false;
         QueueDb.log(this,"Queue stopped by user");
     }
@@ -108,6 +135,7 @@ public class QueueAccessibilityService extends AccessibilityService {
             rowIndex=QueueDb.next(this);
             if(rowIndex<0){running=false;QueueDb.log(this,"Queue complete");return;}
             phone=QueueDb.phone(this,rowIndex);
+            QueueDb.status(this,rowIndex,"in_flight"); // durable crash-safe reservation
             attempt=0;
             launchCurrent();
         };
@@ -202,7 +230,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         long now=System.currentTimeMillis();
         if(now-launchedAt>ATTEMPT_TIMEOUT_MS) {failAttempt("Timed out waiting for verified chat");return;}
         if(now-lastActionAt<STEP_WAIT_MS) {schedule(STEP_WAIT_MS);return;}
-        AccessibilityNodeInfo root=getRootInActiveWindow();
+        AccessibilityNodeInfo root=targetWindowRoot();
         if(root==null){schedule(1000);return;}
         try {
             if(!targetPackage.equals(String.valueOf(root.getPackageName()))) {
@@ -285,6 +313,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
 
     private void clickSend(AccessibilityNodeInfo target) {
+        final int token=generation;
+        final int sendingRow=rowIndex;
         if(target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
             beginVerification();
             return;
@@ -299,11 +329,14 @@ public class QueueAccessibilityService extends AccessibilityService {
                     new GestureDescription.Builder().addStroke(stroke).build(),
                     new GestureResultCallback() {
                         @Override public void onCompleted(GestureDescription g) {
-                            beginVerification();
+                            if(token==generation && sendingRow==rowIndex && running)
+                                beginVerification();
                         }
                         @Override public void onCancelled(GestureDescription g) {
-                            sendInProgress=false;
-                            QueueDb.log(QueueAccessibilityService.this,"Send gesture cancelled");
+                            if(token==generation && sendingRow==rowIndex) {
+                                sendInProgress=false;
+                                QueueDb.log(QueueAccessibilityService.this,"Send gesture cancelled");
+                            }
                         }
                     },handler);
             if(!initiated)sendInProgress=false;
@@ -348,6 +381,92 @@ public class QueueAccessibilityService extends AccessibilityService {
         awaitingResult=false;
         processed++;
         next(delayMs());
+    }
+
+    /** Retrieve the foreground messenger window even if the on-screen keyboard has focus. */
+    private AccessibilityNodeInfo targetWindowRoot() {
+        AccessibilityNodeInfo active=getRootInActiveWindow();
+        if(active!=null) {
+            if(targetPackage.equals(String.valueOf(active.getPackageName())))return active;
+            active.recycle();
+        }
+        try {
+            List<AccessibilityWindowInfo> windows=getWindows();
+            if(windows!=null) {
+                for(AccessibilityWindowInfo window:windows) {
+                    if(window.getType()!=AccessibilityWindowInfo.TYPE_APPLICATION)continue;
+                    AccessibilityNodeInfo root=window.getRoot();
+                    if(root==null)continue;
+                    if(targetPackage.equals(String.valueOf(root.getPackageName())))
+                        return root;
+                    root.recycle();
+                }
+            }
+        } catch(Exception ignored) {}
+        return null;
+    }
+
+    synchronized void inspectMessenger(String messenger) {
+        if(running) {
+            QueueDb.log(this,"Stop the queue before inspecting a messenger");
+            return;
+        }
+        targetName=messenger;
+        targetPackage=packageFor(messenger);
+        if(targetPackage.isEmpty()) {
+            QueueDb.log(this,"Unknown messenger for diagnostic");
+            return;
+        }
+        diagnosticMode=true;
+        QueueDb.log(this,"DIAG started: "+messenger+" (no sending)");
+        try {
+            Intent intent=getPackageManager().getLaunchIntentForPackage(targetPackage);
+            if(intent==null) {
+                QueueDb.log(this,"DIAG: app missing or launcher unavailable");
+                diagnosticMode=false;
+                return;
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            handler.postDelayed(this::recordDiagnostic,3200);
+        } catch(Exception ex) {
+            QueueDb.log(this,"DIAG cannot launch app: "+ex.getClass().getSimpleName());
+            diagnosticMode=false;
+        }
+    }
+    private void recordDiagnostic() {
+        if(!diagnosticMode || running)return;
+        diagnosticMode=false;
+        AccessibilityNodeInfo root=targetWindowRoot();
+        if(root==null) {
+            QueueDb.log(this,"DIAG: no accessible messenger UI. Check unlock and Accessibility.");
+            return;
+        }
+        try {
+            List<AccessibilityNodeInfo> nodes=new ArrayList<>();
+            collect(root,nodes,0,40);
+            int editable=0,visible=0,search=0,send=0;
+            StringBuilder controls=new StringBuilder();
+            for(AccessibilityNodeInfo n:nodes) {
+                if(!n.isVisibleToUser())continue;
+                visible++;
+                if(n.isEditable())editable++;
+                String id=str(n.getViewIdResourceName());
+                String meta=str(n.getContentDescription());
+                if(id.contains("search") || meta.contains("search") || meta.contains("جست"))
+                    search++;
+                if(id.contains("send") || meta.equals("send") || meta.equals("ارسال"))
+                    send++;
+                // Only resource identifiers; never record contact names or message text.
+                if(n.isClickable() && controls.length()<600 && !id.isEmpty()) {
+                    controls.append(id).append(" ");
+                }
+            }
+            QueueDb.log(this,"DIAG "+targetName+": visible="+visible+
+                    " editable="+editable+" search="+search+" send="+send);
+            QueueDb.log(this,"DIAG control IDs: "+controls.toString().trim());
+            QueueDb.log(this,"DIAG complete; no messages sent");
+        } finally {root.recycle();}
     }
 
     private AccessibilityNodeInfo findSearchEditor(AccessibilityNodeInfo root) {

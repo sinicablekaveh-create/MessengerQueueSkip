@@ -110,6 +110,12 @@ public class MainActivity extends Activity {
         root.addView(addContacts);
 
         space(root,6);
+        addButton(root,"INSPECT MESSENGER UI (NO SEND)",0xFF455C88,()->{
+            QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
+            if(s==null){toast("Enable Accessibility first");return;}
+            s.inspectMessenger(NAMES[primary.getSelectedItemPosition()]);
+            toast("Messenger UI inspection started; return to the app to see the log");
+        });
         addButton(root,"▶  TEST ONE CONTACT",0xFF285C96,()->start(true));
         addButton(root,"▶  START AUTOMATIC",0xFF00A768,()->start(false));
         addButton(root,"Ⅱ  PAUSE / RESUME",0xFFF1B950,()-> {
@@ -146,7 +152,7 @@ public class MainActivity extends Activity {
                     QueueDb.get(this,"logs","")));
             toast("Queue log copied. It may contain phone numbers.");
         });
-        root.addView(label("UI confirmed = outgoing message appeared on screen and the composer was cleared. It does NOT prove server delivery. REVIEW means the queue stopped to prevent duplicate sending.",12,0xFFAEBCD0,false));
+        root.addView(label("UI confirmed means message appeared in chat and editor cleared. It is NOT server delivery. REVIEW requires manual inspection. Stop during an uncertain send also marks REVIEW. Inspect Messenger collects only UI control IDs.",12,0xFFAEBCD0,false));
         refresh();
     }
     private void start(boolean testOne) {
