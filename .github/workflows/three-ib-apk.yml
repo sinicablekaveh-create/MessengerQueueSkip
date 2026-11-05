@@ -3,6 +3,8 @@ name: Build THREE IB APK
 on:
   push:
     branches: [ "three-ib-apk-v1" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
