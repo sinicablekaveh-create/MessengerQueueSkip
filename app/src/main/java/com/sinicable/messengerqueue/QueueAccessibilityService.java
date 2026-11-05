@@ -28,7 +28,7 @@ public class QueueAccessibilityService extends AccessibilityService {
     private static final long ATTEMPT_TIMEOUT_MS=60000;
     private volatile boolean running=false;
     private volatile boolean paused=false;
-    private int rowIndex=-1,attempt=0,stage=0,generation=0;
+    private int rowIndex=-1,attempt=0,stage=0,generation=0,safeRetries=0;
     private long launchedAt=0,lastActionAt=0;
     private String phone="",targetName="",targetPackage="",message="",contactAlias="";
     private boolean triedAlias=false,newChatTapped=false,sendInProgress=false;
@@ -209,6 +209,7 @@ public class QueueAccessibilityService extends AccessibilityService {
             phone=QueueDb.phone(this,rowIndex);
             QueueDb.status(this,rowIndex,"in_flight"); // durable crash-safe reservation
             attempt=0;
+            safeRetries=0;
             launchCurrent();
         };
         handler.postDelayed(scheduled,delay);
@@ -266,10 +267,21 @@ public class QueueAccessibilityService extends AccessibilityService {
             return;
         }
         QueueDb.log(this,"Attempt failed: " + reason);
+        if(safeRetries<2) {
+            safeRetries++;
+            QueueDb.log(this,"SAFE RETRY "+safeRetries+"/2 before any Send action");
+            generation++;
+            int token=generation;
+            handler.postDelayed(()->{
+                if(running && !paused && token==generation) launchCurrent();
+            },1200);
+            return;
+        }
         String fallback=QueueDb.get(this,"fallback","None");
         String primary=QueueDb.get(this,"primary","Bale");
         if(attempt==0 && !"None".equals(fallback) && !fallback.equals(primary)) {
             attempt=1;
+            safeRetries=0;
             generation++;
             int token=generation;
             handler.postDelayed(()->{if(running && !paused && token==generation) launchCurrent();},900);
