@@ -163,6 +163,7 @@ public class MainActivity extends Activity {
         addButton(root,"■  STOP ALL QUEUES",0xFFE06150,()->{
             QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
             if(s!=null)s.stopQueue();
+            QueueKeeperService.stop(this);
             toast("Automation stopped. Pending items retained.");refresh();
         });
         addButton(root,"🗑  CLEAR ALL QUEUES",0xFF3E5067,()->new android.app.AlertDialog.Builder(this)
@@ -171,7 +172,9 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("Clear",(d,w)->{
                     QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
-                    if(s!=null)s.stopQueue();QueueDb.clear(this);refresh();
+                    if(s!=null)s.stopQueue();
+                    QueueKeeperService.stop(this);
+                    QueueDb.clear(this);refresh();
                 }).show());
 
         space(root,8);
@@ -282,7 +285,8 @@ public class MainActivity extends Activity {
                 ", backgroundRestricted="+isBackgroundRestricted()+
                 ", batteryExempt="+isBatteryExempt());
         s.startQueue();
-        toast(testOne?"Single queue task started":"Reliability dry-run started. Real queues start only after every enabled messenger passes.");refresh();
+        if(!testOne)QueueKeeperService.start(this);
+        toast(testOne?"Single queue task started":"Reliability dry-run + foreground watchdog started. Real queues start only after every enabled messenger passes.");refresh();
     }
 
     private int parseDelay(EditText e){
@@ -363,6 +367,7 @@ public class MainActivity extends Activity {
                 " | Rubika "+versionOf(packageFor("Rubika"))+" ["+QueueDb.get(this,"calib_rubika","NOT CHECKED")+"]"+
                 " | Eitaa "+versionOf(packageFor("Eitaa"))+" ["+QueueDb.get(this,"calib_eitaa","NOT CHECKED")+"]"+
                 "\nReliability gate="+QueueDb.get(this,"reliability_gate_last","NOT RUN")+
+                " | Keeper="+QueueDb.get(this,"keeper_health","STOPPED")+
                 " | Android Restricted="+isBackgroundRestricted()+
                 " | battery exemption="+isBatteryExempt()+
                 "\nSamsung: put Messenger Queue Skip in Never sleeping apps; keep Power Saving off while queues run.");
