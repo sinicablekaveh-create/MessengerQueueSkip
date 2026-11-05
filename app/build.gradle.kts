@@ -6,8 +6,8 @@ android {
         applicationId = "com.sinicable.messengerqueue"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "2.5.0"
+        versionCode = 13
+        versionName = "2.6.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
