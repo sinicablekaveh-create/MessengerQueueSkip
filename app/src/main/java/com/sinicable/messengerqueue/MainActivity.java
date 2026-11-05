@@ -35,7 +35,7 @@ public class MainActivity extends Activity {
 
     private EditText message,accountPhone,baleDelay,rubikaDelay,eitaaDelay;
     private CheckBox approved,addContacts,keepAwake,baleEnabled,rubikaEnabled,eitaaEnabled;
-    private TextView status,logs,access,reliability,imageLabel;
+    private TextView status,logs,access,reliability,imageLabel,readiness;
     private String imageUri="";
 
     private final Runnable ticker=new Runnable(){
@@ -67,6 +67,12 @@ public class MainActivity extends Activity {
         access=label("",13,0xFFFFCE75,true);root.addView(access);
         addButton(root,"1  ENABLE ACCESSIBILITY",0xFF365FCE,()->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         reliability=label("",12,0xFFBFD1E6,false);root.addView(reliability);
+        readiness=label("",14,0xFFFFD58A,true);root.addView(readiness);
+        addButton(root,"RUN FULL READINESS CHECK",0xFF2A6F97,()->{
+            ReadinessResult r=readinessCheck(true);
+            toast(r.ready?"READY 100%: safe to run Reliability Gate":"Not ready: "+r.reason);
+            refresh();
+        });
         addButton(root,"MAX POWER: BATTERY EXEMPTION",0xFF405F80,()->requestBatteryExemption());
         addButton(root,"RELIABILITY / BATTERY SETTINGS",0xFF405F80,()->{
             try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
@@ -225,6 +231,8 @@ public class MainActivity extends Activity {
     }
 
     private void start(boolean testOne){
+        ReadinessResult rr=readinessCheck(false);
+        if(!rr.ready){toast("START blocked: "+rr.reason);return;}
         if(!approved.isChecked()){toast("Confirm recipients' consent first");return;}
         if(message.getText().toString().trim().isEmpty()){toast("Enter message text");return;}
         if(!baleEnabled.isChecked()&&!rubikaEnabled.isChecked()&&!eitaaEnabled.isChecked()){
@@ -298,6 +306,94 @@ public class MainActivity extends Activity {
         s.startQueue();
         if(!testOne)QueueKeeperService.start(this);
         toast(testOne?"Single queue task started":"Reliability dry-run + foreground watchdog started. Real queues start only after every enabled messenger passes.");refresh();
+    }
+
+    private static class ReadinessResult {
+        final boolean ready;
+        final String reason;
+        final int passed;
+        final int total;
+        ReadinessResult(boolean ready,String reason,int passed,int total){
+            this.ready=ready;this.reason=reason;this.passed=passed;this.total=total;
+        }
+    }
+
+    private ReadinessResult readinessCheck(boolean logIt){
+        int passed=0,total=0;
+        String fail="";
+
+        total++;
+        if(QueueAccessibilityService.INSTANCE!=null)passed++;
+        else if(fail.isEmpty())fail="Enable Accessibility";
+
+        total++;
+        if("1".equals(QueueDb.get(this,"network_available","1")))passed++;
+        else if(fail.isEmpty())fail="Connect to the internet/VPN required by your messengers";
+
+        total++;
+        if(!isBackgroundRestricted())passed++;
+        else if(fail.isEmpty())fail="Remove Android background restriction";
+
+        total++;
+        if(isBatteryExempt())passed++;
+        else if(fail.isEmpty())fail="Allow MAX POWER battery exemption";
+
+        total++;
+        if(QueueDb.items(this).length()>0)passed++;
+        else if(fail.isEmpty())fail="Import Excel/CSV recipients";
+
+        total++;
+        if(message!=null&&!message.getText().toString().trim().isEmpty())passed++;
+        else if(fail.isEmpty())fail="Enter message text";
+
+        total++;
+        boolean enabled=baleEnabled!=null&&baleEnabled.isChecked() ||
+                rubikaEnabled!=null&&rubikaEnabled.isChecked() ||
+                eitaaEnabled!=null&&eitaaEnabled.isChecked();
+        if(enabled)passed++; else if(fail.isEmpty())fail="Enable at least one messenger";
+
+        total++;
+        boolean installed=true;
+        if(baleEnabled!=null&&baleEnabled.isChecked()&&!isInstalled(packageFor("Bale")))installed=false;
+        if(rubikaEnabled!=null&&rubikaEnabled.isChecked()&&!isInstalled(packageFor("Rubika")))installed=false;
+        if(eitaaEnabled!=null&&eitaaEnabled.isChecked()&&!isInstalled(packageFor("Eitaa")))installed=false;
+        if(installed)passed++; else if(fail.isEmpty())fail="Install/sign in to every enabled messenger";
+
+        total++;
+        boolean delays=parseDelay(baleDelay)>=1&&parseDelay(rubikaDelay)>=1&&parseDelay(eitaaDelay)>=1;
+        if(delays)passed++; else if(fail.isEmpty())fail="Set all delays to 1..1440 minutes";
+
+        total++;
+        boolean contactsOk=!addContacts.isChecked()||ContactBridge.permission(this);
+        if(contactsOk)passed++; else if(fail.isEmpty())fail="Allow Contacts permission";
+
+        total++;
+        boolean imageOk=true;
+        if(imageUri!=null&&!imageUri.isEmpty()){
+            try{
+                java.io.InputStream in=getContentResolver().openInputStream(Uri.parse(imageUri));
+                if(in!=null)in.close();
+                String mime=QueueDb.get(this,"image_mime","image/*");
+                if(baleEnabled.isChecked()&&!canShareImage(packageFor("Bale"),mime))imageOk=false;
+                if(rubikaEnabled.isChecked()&&!canShareImage(packageFor("Rubika"),mime))imageOk=false;
+                if(eitaaEnabled.isChecked()&&!canShareImage(packageFor("Eitaa"),mime))imageOk=false;
+            }catch(Exception e){imageOk=false;}
+        }
+        if(imageOk)passed++; else if(fail.isEmpty())fail="Selected image cannot be read/shared by an enabled messenger";
+
+        if(Build.VERSION.SDK_INT>=33){
+            total++;
+            if(checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)==android.content.pm.PackageManager.PERMISSION_GRANTED)passed++;
+            else if(fail.isEmpty())fail="Allow Notifications for watchdog controls";
+        }
+
+        boolean ready=passed==total;
+        String text=(ready?"READY 100%":"NOT READY")+" ("+passed+"/"+total+")";
+        if(readiness!=null)readiness.setText(text+(ready?" • START can proceed":" • "+fail));
+        QueueDb.put(this,"readiness_last",ready?"PASS":"FAIL");
+        QueueDb.put(this,"readiness_score",passed+"/"+total);
+        if(logIt)QueueDb.log(this,"READINESS "+text+(ready?"":" : "+fail));
+        return new ReadinessResult(ready,fail,passed,total);
     }
 
     private int parseDelay(EditText e){
@@ -374,6 +470,7 @@ public class MainActivity extends Activity {
         access.setTextColor(ready?0xFF57E6AC:0xFFFFC27E);
         String mode=ready?QueueAccessibilityService.INSTANCE.state():"OFF";
         status.setText(QueueDb.summary(this)+"\nEngine: "+mode);
+        ReadinessResult readyNow=readinessCheck(false);
         reliability.setText("Bale "+versionOf(packageFor("Bale"))+" ["+QueueDb.get(this,"calib_bale","NOT CHECKED")+"]"+
                 " | Rubika "+versionOf(packageFor("Rubika"))+" ["+QueueDb.get(this,"calib_rubika","NOT CHECKED")+"]"+
                 " | Eitaa "+versionOf(packageFor("Eitaa"))+" ["+QueueDb.get(this,"calib_eitaa","NOT CHECKED")+"]"+
@@ -381,7 +478,8 @@ public class MainActivity extends Activity {
                 " | Keeper="+QueueDb.get(this,"keeper_health","STOPPED")+
                 " | Android Restricted="+isBackgroundRestricted()+
                 " | battery exemption="+isBatteryExempt()+
-                "\nSamsung: put Messenger Queue Skip in Never sleeping apps; keep Power Saving off while queues run.");
+                "\nSamsung: put Messenger Queue Skip in Never sleeping apps; keep Power Saving off while queues run."+
+                "\nReadiness="+(readyNow.ready?"100% READY":(readyNow.passed+"/"+readyNow.total+" • "+readyNow.reason)));
         String log=QueueDb.get(this,"logs","No events yet.");
         if(!log.equals(logs.getText().toString()))logs.setText(log);
     }
