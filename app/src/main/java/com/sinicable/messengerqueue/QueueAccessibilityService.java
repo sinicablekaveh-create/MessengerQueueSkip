@@ -57,6 +57,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         final boolean wantsRun="1".equals(QueueDb.get(this,"desired_running","0"));
         final boolean wantsPause="1".equals(QueueDb.get(this,"desired_paused","0"));
         if(wantsRun) {
+            QueueKeeperService.start(this);
             handler.postDelayed(()->{
                 synchronized(QueueAccessibilityService.this) {
                     if(running)return;
@@ -65,6 +66,7 @@ public class QueueAccessibilityService extends AccessibilityService {
                         QueueDb.put(this,"desired_running","0");
                         QueueDb.put(this,"desired_paused","0");
                         QueueDb.log(this,"Persistent START cleared: all enabled queues finished");
+                        QueueKeeperService.stop(this);
                         return;
                     }
                     message=QueueDb.get(this,"message","");
@@ -127,6 +129,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         imageMime=QueueDb.get(this,"image_mime","image/*");
         QueueDb.put(this,"desired_running",testOne?"0":"1");
         QueueDb.put(this,"desired_paused","0");
+        if(!testOne)QueueKeeperService.start(this);
         acquireQueueWakeLock();
         if(testOne) {
             QueueDb.log(this,"TEST ONE TASK START");
@@ -192,6 +195,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         waitingForNext=false;
         calibrationMode=false;
         releaseQueueWakeLock();
+        QueueKeeperService.stop(this);
         QueueDb.log(this,"All automatic queues stopped by user");
     }
 
@@ -237,6 +241,8 @@ public class QueueAccessibilityService extends AccessibilityService {
             QueueDb.put(this,"desired_running","0");
             QueueDb.put(this,"desired_paused","0");
             QueueDb.log(this,"TEST ONE TASK FINISHED");
+            releaseQueueWakeLock();
+            QueueKeeperService.stop(this);
             return;
         }
         String app=chooseNextMessenger();
@@ -247,6 +253,7 @@ public class QueueAccessibilityService extends AccessibilityService {
             QueueDb.put(this,"desired_paused","0");
             QueueDb.log(this,"All enabled queues complete");
             releaseQueueWakeLock();
+            QueueKeeperService.stop(this);
             return;
         }
         long now=System.currentTimeMillis();
@@ -916,6 +923,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         QueueDb.put(this,"desired_running","0");
         QueueDb.put(this,"desired_paused","0");
         releaseQueueWakeLock();
+        QueueKeeperService.stop(this);
         performGlobalAction(GLOBAL_ACTION_BACK);
     }
 
