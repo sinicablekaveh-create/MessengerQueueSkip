@@ -34,9 +34,9 @@ public class QueueAccessibilityService extends AccessibilityService {
     private volatile boolean running=false;
     private volatile boolean paused=false;
 
-    private int rowIndex=-1,stage=0,generation=0,safeRetries=0;
+    private int rowIndex=-1,stage=0,generation=0,safeRetries=0,searchVariant=0;
     private int processed=0,bubblesBefore=0;
-    private long launchedAt=0,lastActionAt=0,sendActionAt=0,searchStartedAt=0,pausedAt=0;
+    private long launchedAt=0,lastActionAt=0,sendActionAt=0,searchStartedAt=0,pausedAt=0,lastUiEventAt=0;
     private long nextDueAt=0;
     private String currentMessenger="",phone="",targetName="",targetPackage="",message="",contactAlias="";
     private String imageUri="",imageMime="image/*";
@@ -102,6 +102,7 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
     @Override public void onInterrupt() { }
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+        lastUiEventAt=android.os.SystemClock.uptimeMillis();
         if(!running||paused)return;
         if(e.getEventType()==AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
            e.getEventType()==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) schedule(450);
@@ -297,6 +298,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         lastActionAt=0;
         searchStartedAt=0;
         triedAlias=false;
+        searchVariant=0;
         newChatTapped=false;
         sendInProgress=false;
         awaitingResult=false;
@@ -405,6 +407,7 @@ public class QueueAccessibilityService extends AccessibilityService {
     private void step() {
         if(!running||paused||waitingForNext)return;
         if(calibrationMode){calibrationStep();return;}
+        if(!uiSettled()){schedule(220);return;}
         long now=System.currentTimeMillis();
         if(now-launchedAt>ATTEMPT_TIMEOUT_MS){failAttempt("Timed out waiting for verified UI");return;}
         if(now-lastActionAt<STEP_WAIT_MS){schedule(STEP_WAIT_MS);return;}
@@ -429,21 +432,23 @@ public class QueueAccessibilityService extends AccessibilityService {
                 }
             } else if(stage==1||stage==21) {
                 AccessibilityNodeInfo input=findSearchEditor(root);
-                String query=triedAlias?contactAlias:phone;
+                String query=currentSearchQuery();
                 if(input!=null&&!query.isEmpty()&&setText(input,query)){
                     stage=imageMode?22:2;searchStartedAt=now;lastActionAt=now;schedule(1500);return;
                 }
             } else if(stage==2||stage==22) {
-                AccessibilityNodeInfo match=findVerifiedResult(root,phone,triedAlias?contactAlias:"");
+                AccessibilityNodeInfo match=findVerifiedResult(root,phone,searchVariant>=2?contactAlias:"");
                 if(match!=null&&click(match)){
                     stage=imageMode?23:3;lastActionAt=now;
                     QueueDb.log(this,"Matched verified contact in "+currentMessenger);
                     schedule(1200);return;
                 }
-                if(!triedAlias&&!contactAlias.isEmpty()&&now-searchStartedAt>9000){
-                    triedAlias=true;stage=imageMode?21:1;
-                    QueueDb.log(this,"Searching synced contact alias in "+currentMessenger);
-                    schedule(300);return;
+                if(now-searchStartedAt>7000){
+                    if(advanceSearchVariant()) {
+                        stage=imageMode?21:1;
+                        searchStartedAt=now;
+                        schedule(300);return;
+                    }
                 }
             } else if(stage==3) {
                 AccessibilityNodeInfo composer=findChatComposer(root);
@@ -579,6 +584,36 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
 
 
+    private boolean uiSettled() {
+        long last=lastUiEventAt;
+        if(last<=0)return true;
+        return android.os.SystemClock.uptimeMillis()-last>=420L;
+    }
+
+    private String currentSearchQuery() {
+        if(searchVariant<=0)return phone;
+        if(searchVariant==1)return ContactImporter.international(phone);
+        return contactAlias==null?"":contactAlias;
+    }
+
+    private boolean advanceSearchVariant() {
+        if(searchVariant==0) {
+            String intl=ContactImporter.international(phone);
+            if(intl!=null&&!intl.isEmpty()&&!intl.equals(phone)) {
+                searchVariant=1;
+                QueueDb.log(this,"Search fallback: international number in "+currentMessenger);
+                return true;
+            }
+        }
+        if(searchVariant<=1 && contactAlias!=null && !contactAlias.isEmpty()) {
+            searchVariant=2;
+            triedAlias=true;
+            QueueDb.log(this,"Search fallback: synced MQS alias in "+currentMessenger);
+            return true;
+        }
+        return false;
+    }
+
     private boolean screenReady() {
         try {
             PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
@@ -692,6 +727,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void calibrationStep() {
         if(!calibrationMode||!running||paused)return;
+        if(!uiSettled()){schedule(220);return;}
         long now=System.currentTimeMillis();
         if(now-launchedAt>60000L) {
             calibrationFail("Dry-run timeout at stage "+stage);
@@ -722,22 +758,24 @@ public class QueueAccessibilityService extends AccessibilityService {
                 }
             } else if(stage==101||stage==121) {
                 AccessibilityNodeInfo input=findSearchEditor(root);
-                String query=triedAlias?contactAlias:phone;
+                String query=currentSearchQuery();
                 if(input!=null&&!query.isEmpty()&&setText(input,query)) {
                     stage=stage==121?122:102;searchStartedAt=now;lastActionAt=now;schedule(1200);return;
                 }
             } else if(stage==102||stage==122) {
-                AccessibilityNodeInfo match=findVerifiedResult(root,phone,triedAlias?contactAlias:"");
+                AccessibilityNodeInfo match=findVerifiedResult(root,phone,searchVariant>=2?contactAlias:"");
                 if(match!=null&&click(match)) {
                     stage=stage==122?123:103;
                     lastActionAt=now;
                     schedule(1000);
                     return;
                 }
-                if(!triedAlias&&!contactAlias.isEmpty()&&now-searchStartedAt>7000) {
-                    triedAlias=true;
-                    stage=stage==122?121:101;
-                    schedule(250);return;
+                if(now-searchStartedAt>6500) {
+                    if(advanceSearchVariant()) {
+                        stage=stage==122?121:101;
+                        searchStartedAt=now;
+                        schedule(250);return;
+                    }
                 }
             } else if(stage==103) {
                 AccessibilityNodeInfo composer=findChatComposer(root);
@@ -783,6 +821,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         try {
             imageMode=true;
             triedAlias=false;
+            searchVariant=0;
             newChatTapped=false;
             searchStartedAt=0;
             lastActionAt=0;
