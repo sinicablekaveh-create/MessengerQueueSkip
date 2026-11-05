@@ -437,6 +437,16 @@ public class QueueAccessibilityService extends AccessibilityService {
                     stage=imageMode?22:2;searchStartedAt=now;lastActionAt=now;schedule(1500);return;
                 }
             } else if(stage==2||stage==22) {
+                AccessibilityNodeInfo currentSearch=findSearchEditor(root);
+                String expectedQuery=currentSearchQuery();
+                String actualQuery=currentSearch==null||currentSearch.getText()==null?"":currentSearch.getText().toString();
+                if(currentSearch!=null&&!expectedQuery.isEmpty()&&!onlyDigits(actualQuery).contains(
+                        onlyDigits(expectedQuery).length()>=10?
+                        onlyDigits(expectedQuery).substring(onlyDigits(expectedQuery).length()-10):
+                        onlyDigits(expectedQuery)) && searchVariant<2) {
+                    stage=imageMode?21:1;
+                    schedule(250);return;
+                }
                 AccessibilityNodeInfo match=findVerifiedResult(root,phone,searchVariant>=2?contactAlias:"");
                 if(match!=null&&click(match)){
                     stage=imageMode?23:3;lastActionAt=now;
@@ -490,9 +500,17 @@ public class QueueAccessibilityService extends AccessibilityService {
                     return;
                 }
             } else if(stage==24) {
-                if(now-sendActionAt>2500){
-                    completeTask("Text verified + image Send UI action completed");
-                    return;
+                if(now-sendActionAt>=1800){
+                    AccessibilityNodeInfo composer=findChatComposer(root);
+                    AccessibilityNodeInfo shareSend=findGenericSend(root);
+                    if(composer!=null&&shareSend==null) {
+                        completeTask("Text verified + image Send returned to chat UI");
+                        return;
+                    }
+                    if(now-sendActionAt>10000) {
+                        markReview("Image Send was invoked but return to chat UI was not verified");
+                        return;
+                    }
                 }
             }
         } catch(Exception e){
@@ -763,6 +781,16 @@ public class QueueAccessibilityService extends AccessibilityService {
                     stage=stage==121?122:102;searchStartedAt=now;lastActionAt=now;schedule(1200);return;
                 }
             } else if(stage==102||stage==122) {
+                AccessibilityNodeInfo currentSearch=findSearchEditor(root);
+                String expectedQuery=currentSearchQuery();
+                String actualQuery=currentSearch==null||currentSearch.getText()==null?"":currentSearch.getText().toString();
+                if(currentSearch!=null&&searchVariant<2&&!expectedQuery.isEmpty()&&!onlyDigits(actualQuery).contains(
+                        onlyDigits(expectedQuery).length()>=10?
+                        onlyDigits(expectedQuery).substring(onlyDigits(expectedQuery).length()-10):
+                        onlyDigits(expectedQuery))) {
+                    stage=stage==122?121:101;
+                    schedule(250);return;
+                }
                 AccessibilityNodeInfo match=findVerifiedResult(root,phone,searchVariant>=2?contactAlias:"");
                 if(match!=null&&click(match)) {
                     stage=stage==122?123:103;
