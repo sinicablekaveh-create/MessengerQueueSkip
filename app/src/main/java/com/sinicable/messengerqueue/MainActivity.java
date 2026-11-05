@@ -55,6 +55,11 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
+        if(Build.VERSION.SDK_INT>=33 &&
+           checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},533);
+        }
+
         root.addView(label("MESSENGER QUEUE SKIP",26,Color.WHITE,true));
         root.addView(label("3 independent queues • Excel contacts • text + optional image • persistent START",13,0xFFBAC8DB,false));
 
