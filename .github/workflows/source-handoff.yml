@@ -1,0 +1,26 @@
+name: Export THREE IB source ZIP
+on:
+  push:
+    paths:
+      - .github/workflows/source-handoff.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package tracked source files
+        run: |
+          git archive --format=zip --prefix=MessengerQueueSkip/ HEAD -o THREE-IB-MessengerQueueSkip-SOURCE.zip
+          unzip -t THREE-IB-MessengerQueueSkip-SOURCE.zip >/dev/null
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: THREE-IB-MessengerQueueSkip-SOURCE
+          path: THREE-IB-MessengerQueueSkip-SOURCE.zip
+          if-no-files-found: error
+          retention-days: 30
