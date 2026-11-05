@@ -693,6 +693,7 @@ public class QueueAccessibilityService extends AccessibilityService {
                         setText(composer,"");
                         QueueDb.log(this,"DRY-RUN "+currentMessenger+": text route PASS");
                         if(imageUri!=null&&!imageUri.trim().isEmpty()) {
+                            stage=119;
                             handler.postDelayed(this::launchCalibrationImage,500);
                         } else {
                             calibrationPassCurrent("text route");
@@ -704,6 +705,7 @@ public class QueueAccessibilityService extends AccessibilityService {
                 AccessibilityNodeInfo send=findGenericSend(root);
                 if(send!=null) {
                     QueueDb.log(this,"DRY-RUN "+currentMessenger+": image route PASS");
+                    stage=199;
                     performGlobalAction(GLOBAL_ACTION_BACK);
                     handler.postDelayed(()->performGlobalAction(GLOBAL_ACTION_BACK),300);
                     calibrationPassCurrent("text + image routes");
