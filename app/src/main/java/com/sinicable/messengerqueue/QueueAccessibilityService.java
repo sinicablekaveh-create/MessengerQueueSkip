@@ -10,6 +10,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
+import android.content.pm.PackageInfo;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
@@ -39,6 +41,11 @@ public class QueueAccessibilityService extends AccessibilityService {
     private boolean imageMode=false,triedAlias=false,newChatTapped=false,sendInProgress=false;
     private boolean waitingForNext=false,stepScheduled=false,awaitingResult=false,testOne=false;
     private volatile boolean diagnosticMode=false;
+    private volatile boolean calibrationMode=false;
+    private final ArrayList<String> calibrationApps=new ArrayList<>();
+    private int calibrationIndex=0,calibrationRetries=0;
+    private String calibrationProbe="MQS_PRECHECK";
+    private PowerManager.WakeLock queueWakeLock;
     private Runnable scheduled;
 
     @Override protected void onServiceConnected() {
@@ -80,6 +87,7 @@ public class QueueAccessibilityService extends AccessibilityService {
     @Override public void onDestroy() {
         running=false;
         generation++;
+        releaseQueueWakeLock();
         INSTANCE=null;
         super.onDestroy();
     }
@@ -102,18 +110,20 @@ public class QueueAccessibilityService extends AccessibilityService {
         paused=false;
         processed=0;
         diagnosticMode=false;
+        calibrationMode=false;
         testOne="1".equals(QueueDb.get(this,"testOne","0"));
         message=QueueDb.get(this,"message","");
         imageUri=QueueDb.get(this,"image_uri","");
         QueueDb.put(this,"desired_running",testOne?"0":"1");
         QueueDb.put(this,"desired_paused","0");
-        if(!testOne) {
-            long now=System.currentTimeMillis();
-            for(String app:QueueDb.APPS) if(QueueDb.enabled(this,app) && QueueDb.due(this,app)<=0)
-                QueueDb.due(this,app,now);
+        acquireQueueWakeLock();
+        if(testOne) {
+            QueueDb.log(this,"TEST ONE TASK START");
+            scheduleEarliest(1000);
+        } else {
+            QueueDb.log(this,"HIGH RELIABILITY START: automatic dry-run calibration begins");
+            beginCalibration();
         }
-        QueueDb.log(this,testOne?"TEST ONE TASK START":"START ALL ENABLED QUEUES (persistent)");
-        scheduleEarliest(1000);
     }
 
     synchronized void togglePause() {
@@ -168,12 +178,15 @@ public class QueueAccessibilityService extends AccessibilityService {
             }
         }
         waitingForNext=false;
+        calibrationMode=false;
+        releaseQueueWakeLock();
         QueueDb.log(this,"All automatic queues stopped by user");
     }
 
     String state() {
         if(!running)return "STOPPED";
         if(paused)return "PAUSED";
+        if(calibrationMode)return "RELIABILITY GATE: "+currentMessenger+" / "+phone;
         if(waitingForNext)return "WAITING FOR NEXT DUE QUEUE";
         return "RUNNING: "+currentMessenger+" / "+phone+(imageMode?" / IMAGE":" / TEXT");
     }
