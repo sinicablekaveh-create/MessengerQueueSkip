@@ -68,11 +68,6 @@ public class MainActivity extends Activity {
         addButton(root,"1  ENABLE ACCESSIBILITY",0xFF365FCE,()->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         reliability=label("",12,0xFFBFD1E6,false);root.addView(reliability);
         readiness=label("",14,0xFFFFD58A,true);root.addView(readiness);
-        addButton(root,"RUN FULL READINESS CHECK",0xFF2A6F97,()->{
-            ReadinessResult r=readinessCheck(true);
-            toast(r.ready?"READY 100%: safe to run Reliability Gate":"Not ready: "+r.reason);
-            refresh();
-        });
         addButton(root,"MAX POWER: BATTERY EXEMPTION",0xFF405F80,()->requestBatteryExemption());
         addButton(root,"RELIABILITY / BATTERY SETTINGS",0xFF405F80,()->{
             try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
@@ -231,13 +226,12 @@ public class MainActivity extends Activity {
     }
 
     private void start(boolean testOne){
-        ReadinessResult rr=readinessCheck(false);
-        if(!rr.ready){toast("START blocked: "+rr.reason);return;}
         if(!approved.isChecked()){toast("Confirm recipients' consent first");return;}
         if(message.getText().toString().trim().isEmpty()){toast("Enter message text");return;}
         if(!baleEnabled.isChecked()&&!rubikaEnabled.isChecked()&&!eitaaEnabled.isChecked()){
             toast("Enable at least one messenger queue");return;
         }
+        if(QueueDb.items(this).length()==0){toast("Import Excel/CSV recipients first");return;}
 
         int bd=parseDelay(baleDelay),rd=parseDelay(rubikaDelay),ed=parseDelay(eitaaDelay);
         if(bd<1||rd<1||ed<1){toast("Each delay must be 1 to 1440 minutes");return;}
@@ -246,22 +240,8 @@ public class MainActivity extends Activity {
         if(baleEnabled.isChecked()&&!isInstalled(packageFor("Bale")))missing.append("Bale ");
         if(rubikaEnabled.isChecked()&&!isInstalled(packageFor("Rubika")))missing.append("Rubika ");
         if(eitaaEnabled.isChecked()&&!isInstalled(packageFor("Eitaa")))missing.append("Eitaa ");
-        if(missing.length()>0){toast("Install/sign in first: "+missing.toString().trim());return;}
+        if(missing.length()>0){toast("Install and sign in first: "+missing.toString().trim());return;}
 
-        if(isBackgroundRestricted()){
-            toast("Android has this app in Restricted mode. Remove restriction before START.");
-            try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}catch(Exception ignored){}
-            return;
-        }
-        if(!testOne&&!isBatteryExempt()){
-            toast("MAX POWER requires battery optimization exemption. Allow it, then press START again.");
-            requestBatteryExemption();
-            return;
-        }
-        if(addContacts.isChecked()&&!ContactBridge.permission(this)){
-            requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS,android.Manifest.permission.WRITE_CONTACTS},532);
-            toast("Allow Contacts access and press START again");return;
-        }
         if(!imageUri.isEmpty()){
             try {
                 java.io.InputStream in=getContentResolver().openInputStream(Uri.parse(imageUri));
@@ -287,25 +267,81 @@ public class MainActivity extends Activity {
         QueueDb.put(this,"delay_rubika",String.valueOf(rd));
         QueueDb.put(this,"delay_eitaa",String.valueOf(ed));
         QueueDb.put(this,"testOne",testOne?"1":"0");
+        QueueDb.put(this,"pending_auto_start","1");
+        QueueDb.put(this,"pending_test_one",testOne?"1":"0");
+        QueueDb.put(this,"pending_prompt","");
 
+        continueAutomaticStart();
+    }
+
+    private void continueAutomaticStart(){
+        if(!"1".equals(QueueDb.get(this,"pending_auto_start","0")))return;
+        boolean testOne="1".equals(QueueDb.get(this,"pending_test_one","0"));
+
+        if(Build.VERSION.SDK_INT>=33 &&
+           checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+            if(!"notification".equals(QueueDb.get(this,"pending_prompt",""))){
+                QueueDb.put(this,"pending_prompt","notification");
+                requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},533);
+            }
+            return;
+        }
+
+        if(addContacts.isChecked()&&!ContactBridge.permission(this)){
+            if(!"contacts".equals(QueueDb.get(this,"pending_prompt",""))){
+                QueueDb.put(this,"pending_prompt","contacts");
+                requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS,android.Manifest.permission.WRITE_CONTACTS},532);
+            }
+            return;
+        }
+
+        if(QueueAccessibilityService.INSTANCE==null){
+            if(!"accessibility".equals(QueueDb.get(this,"pending_prompt",""))){
+                QueueDb.put(this,"pending_prompt","accessibility");
+                toast("Enable Messenger Queue Skip Accessibility once; START will continue automatically.");
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            }
+            return;
+        }
+
+        if(isBackgroundRestricted()){
+            if(!"background".equals(QueueDb.get(this,"pending_prompt",""))){
+                QueueDb.put(this,"pending_prompt","background");
+                toast("Remove Restricted background mode; START will continue automatically.");
+                try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
+                catch(Exception ignored){}
+            }
+            return;
+        }
+
+        if(!testOne&&!isBatteryExempt()){
+            if(!"battery".equals(QueueDb.get(this,"pending_prompt",""))){
+                QueueDb.put(this,"pending_prompt","battery");
+                toast("Allow MAX POWER battery exemption once; START will continue automatically.");
+                requestBatteryExemption();
+            }
+            return;
+        }
+
+        if(!"1".equals(QueueDb.get(this,"network_available","1"))){
+            QueueDb.put(this,"pending_prompt","network");
+            toast("Waiting for internet/VPN. START is saved and will continue automatically.");
+            return;
+        }
+
+        QueueDb.put(this,"pending_auto_start","0");
+        QueueDb.put(this,"pending_prompt","");
         if(baleEnabled.isChecked()&&QueueDb.due(this,"Bale")<=0)QueueDb.due(this,"Bale",System.currentTimeMillis());
         if(rubikaEnabled.isChecked()&&QueueDb.due(this,"Rubika")<=0)QueueDb.due(this,"Rubika",System.currentTimeMillis());
         if(eitaaEnabled.isChecked()&&QueueDb.due(this,"Eitaa")<=0)QueueDb.due(this,"Eitaa",System.currentTimeMillis());
 
         QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
-        if(s==null){
-            toast("Enable Messenger Queue Skip in Accessibility settings");
-            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));return;
-        }
-        QueueDb.log(this,"PREFLIGHT OK: Bale="+versionOf(packageFor("Bale"))+
-                ", Rubika="+versionOf(packageFor("Rubika"))+
-                ", Eitaa="+versionOf(packageFor("Eitaa"))+
-                ", image="+(!imageUri.isEmpty())+
-                ", backgroundRestricted="+isBackgroundRestricted()+
-                ", batteryExempt="+isBatteryExempt());
+        if(s==null)return;
+        QueueDb.log(this,"AUTO-SETUP COMPLETE: launching Reliability Gate automatically");
         s.startQueue();
         if(!testOne)QueueKeeperService.start(this);
-        toast(testOne?"Single queue task started":"Reliability dry-run + foreground watchdog started. Real queues start only after every enabled messenger passes.");refresh();
+        toast(testOne?"Single queue task started":"START accepted: auto-setup complete, Reliability Gate running.");
+        refresh();
     }
 
     private static class ReadinessResult {
@@ -531,8 +567,19 @@ public class MainActivity extends Activity {
         return pm!=null&&pm.isIgnoringBatteryOptimizations(getPackageName());
     }
 
-    @Override protected void onResume(){super.onResume();handler.post(ticker);}
+    @Override protected void onResume(){
+        super.onResume();
+        QueueDb.put(this,"pending_prompt","");
+        handler.post(ticker);
+        handler.postDelayed(this::continueAutomaticStart,700);
+    }
     @Override protected void onPause(){handler.removeCallbacks(ticker);super.onPause();}
+
+    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults);
+        QueueDb.put(this,"pending_prompt","");
+        handler.postDelayed(this::continueAutomaticStart,300);
+    }
 
     private TextView label(String s,int sp,int color,boolean bold){
         TextView t=new TextView(this);t.setText(s);t.setTextSize(sp);t.setTextColor(color);
