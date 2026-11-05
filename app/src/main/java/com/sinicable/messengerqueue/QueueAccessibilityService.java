@@ -199,6 +199,17 @@ public class QueueAccessibilityService extends AccessibilityService {
         QueueDb.log(this,"All automatic queues stopped by user");
     }
 
+    synchronized void messengerPackageChanged(String app) {
+        if(!running||app==null)return;
+        QueueDb.log(this,app+" changed while queue active; next safe slot will recalibrate");
+        if(rowIndex<0&&!calibrationMode&&!paused) {
+            generation++;
+            if(scheduled!=null)handler.removeCallbacks(scheduled);
+            waitingForNext=false;
+            beginCalibration();
+        }
+    }
+
     synchronized void networkChanged(boolean available) {
         if(!running)return;
         long now=System.currentTimeMillis();
