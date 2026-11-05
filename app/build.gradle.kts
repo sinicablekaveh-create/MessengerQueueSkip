@@ -3,11 +3,11 @@ android {
     namespace = "com.sinicable.messengerqueue"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.sinicable.messengerqueue"
+        applicationId = "com.sinicable.threeib.telegram"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "2.7.0"
+        versionCode = 16
+        versionName = "3.1.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
@@ -17,3 +17,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+
+dependencies { implementation("io.github.tdlib-android:core:0.1.1") }

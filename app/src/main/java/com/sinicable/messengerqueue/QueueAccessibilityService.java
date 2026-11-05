@@ -1363,3 +1363,4 @@ public class QueueAccessibilityService extends AccessibilityService {
         return dispatchGesture(new GestureDescription.Builder().addStroke(stroke).build(),null,null);
     }
 }
+

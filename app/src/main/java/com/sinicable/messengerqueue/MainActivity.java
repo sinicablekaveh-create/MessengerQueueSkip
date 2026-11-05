@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
         root.addView(label("MESSENGER QUEUE SKIP",26,Color.WHITE,true));
         root.addView(label("3 independent queues • Excel contacts • text + optional image • persistent START",13,0xFFBAC8DB,false));
 
+        addButton(root,"TELEGRAM • DIRECT API",0xFF14865E,()->startActivity(new Intent(this,TelegramActivity.class)));
         space(root,12);
         access=label("",13,0xFFFFCE75,true);root.addView(access);
         addButton(root,"1  ENABLE ACCESSIBILITY",0xFF365FCE,()->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
@@ -619,3 +620,4 @@ public class MainActivity extends Activity {
     private void space(LinearLayout root,int size){View v=new View(this);root.addView(v,lp(1,dp(size)));}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 }
+

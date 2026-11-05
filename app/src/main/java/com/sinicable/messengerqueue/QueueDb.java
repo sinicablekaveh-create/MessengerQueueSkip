@@ -184,3 +184,4 @@ final class QueueDb {
         prefs(c).edit().putString("logs",all).apply();
     }
 }
+
