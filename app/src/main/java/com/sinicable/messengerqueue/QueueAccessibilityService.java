@@ -36,7 +36,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private int rowIndex=-1,stage=0,generation=0,safeRetries=0,searchVariant=0;
     private int processed=0,bubblesBefore=0;
-    private long launchedAt=0,lastActionAt=0,sendActionAt=0,searchStartedAt=0,pausedAt=0,lastUiEventAt=0;
+    private long launchedAt=0,lastActionAt=0,sendActionAt=0,searchStartedAt=0,pausedAt=0,lastUiEventAt=0,networkPauseAt=0;
     private long nextDueAt=0;
     private String currentMessenger="",phone="",targetName="",targetPackage="",message="",contactAlias="";
     private String imageUri="",imageMime="image/*";
@@ -199,9 +199,35 @@ public class QueueAccessibilityService extends AccessibilityService {
         QueueDb.log(this,"All automatic queues stopped by user");
     }
 
+    synchronized void networkChanged(boolean available) {
+        if(!running)return;
+        long now=System.currentTimeMillis();
+        if(!available) {
+            if(networkPauseAt<=0)networkPauseAt=now;
+            return;
+        }
+        if(networkPauseAt>0) {
+            long delta=Math.max(0,now-networkPauseAt);
+            launchedAt+=delta;
+            if(searchStartedAt>0)searchStartedAt+=delta;
+            if(sendActionAt>0)sendActionAt+=delta;
+            if(lastActionAt>0)lastActionAt+=delta;
+            networkPauseAt=0;
+            QueueDb.log(this,"Network restored; queue attempt resumed without consuming timeout");
+        }
+        if(!paused) {
+            if(rowIndex<0)scheduleEarliest(250); else schedule(250);
+        }
+    }
+
+    private boolean networkReady() {
+        return "1".equals(QueueDb.get(this,"network_available","1"));
+    }
+
     String state() {
         if(!running)return "STOPPED";
         if(paused)return "PAUSED";
+        if(!networkReady())return "WAITING FOR NETWORK";
         if(calibrationMode)return "RELIABILITY GATE: "+currentMessenger+" / "+phone;
         if(waitingForNext)return "WAITING FOR NEXT DUE QUEUE";
         return "RUNNING: "+currentMessenger+" / "+phone+(imageMode?" / IMAGE":" / TEXT");
@@ -222,6 +248,24 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void scheduleEarliest(long minimumDelay) {
         if(!running||paused)return;
+        if(rowIndex<0&&!testOne&&!calibrationMode&&!calibrationStillValid()) {
+            QueueDb.log(this,"Reliability fingerprint changed; recalibrating before next slot");
+            beginCalibration();
+            return;
+        }
+        if(!networkReady()) {
+            waitingForNext=true;
+            generation++;
+            int netToken=generation;
+            QueueDb.log(this,"Queue waiting for network; schedule preserved");
+            handler.postDelayed(()->{
+                if(netToken==generation&&running&&!paused){
+                    waitingForNext=false;
+                    scheduleEarliest(0);
+                }
+            },3000);
+            return;
+        }
         if(!screenReady()) {
             waitingForNext=true;
             generation++;
@@ -316,6 +360,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void launchText() {
         if(!running||paused)return;
+        if(!networkReady()){networkChanged(false);schedule(1500);return;}
         generation++;
         resetAttempt(false);
         QueueDb.log(this,"TEXT "+currentMessenger+" -> "+phone);
@@ -330,6 +375,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void launchImageShare() {
         if(!running||paused)return;
+        if(!networkReady()){networkChanged(false);schedule(1500);return;}
         if(imageUri==null||imageUri.trim().isEmpty()) {
             completeTask("Text UI confirmed; no image selected");
             return;
@@ -413,6 +459,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void step() {
         if(!running||paused||waitingForNext)return;
+        if(!networkReady()){networkChanged(false);schedule(1500);return;}
         if(calibrationMode){calibrationStep();return;}
         if(!uiSettled()){schedule(220);return;}
         long now=System.currentTimeMillis();
@@ -752,6 +799,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void calibrationStep() {
         if(!calibrationMode||!running||paused)return;
+        if(!networkReady()){networkChanged(false);schedule(1500);return;}
         if(!uiSettled()){schedule(220);return;}
         long now=System.currentTimeMillis();
         if(now-launchedAt>60000L) {
