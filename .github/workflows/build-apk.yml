@@ -17,15 +17,19 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Install SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Install Android SDK packages
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Compile, package and sign APK with SDK tools
         shell: bash
         run: |
           set -euo pipefail
           ROOT="$PWD"
-          SDK="$ANDROID_HOME"
+          SDK="/usr/local/lib/android/sdk"
           TOOLS="$SDK/build-tools/35.0.0"
           ANDROID_JAR="$SDK/platforms/android-35/android.jar"
           OUT="$RUNNER_TEMP/mqs"
