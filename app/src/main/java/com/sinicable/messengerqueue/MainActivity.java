@@ -34,7 +34,7 @@ public class MainActivity extends Activity {
     private final Handler handler=new Handler(Looper.getMainLooper());
 
     private EditText message,accountPhone,baleDelay,rubikaDelay,eitaaDelay;
-    private CheckBox approved,addContacts,baleEnabled,rubikaEnabled,eitaaEnabled;
+    private CheckBox approved,addContacts,keepAwake,baleEnabled,rubikaEnabled,eitaaEnabled;
     private TextView status,logs,access,reliability,imageLabel;
     private String imageUri="";
 
@@ -65,6 +65,17 @@ public class MainActivity extends Activity {
         addButton(root,"RELIABILITY / BATTERY SETTINGS",0xFF405F80,()->{
             try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
             catch(Exception e){startActivity(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS));}
+        });
+        addButton(root,"SAMSUNG: NEVER SLEEPING APPS",0xFF405F80,()->{
+            try {
+                Intent i=new Intent("com.samsung.android.sm.ACTION_OPEN_CHECKABLE_LISTACTIVITY");
+                i.setPackage("com.samsung.android.lool");
+                i.putExtra("activity_type",2);
+                startActivity(i);
+            } catch(Exception e) {
+                try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
+                catch(Exception ignored){}
+            }
         });
 
         space(root,12);
@@ -127,10 +138,18 @@ public class MainActivity extends Activity {
         addContacts=new CheckBox(this);
         addContacts.setText("Create uniquely named local contacts when needed for messenger search.");
         addContacts.setTextColor(0xFFD1DFE9);
-        addContacts.setChecked("1".equals(QueueDb.get(this,"addContacts","0")));
+        addContacts.setChecked("1".equals(QueueDb.get(this,"addContacts","1")));
         root.addView(addContacts);
 
-        addButton(root,"▶  START ALL ENABLED QUEUES",0xFF00A768,()->start(false));
+        keepAwake=new CheckBox(this);
+        keepAwake.setText("Keep CPU/screen awake while automatic queues are running.");
+        keepAwake.setTextColor(0xFFD1DFE9);
+        keepAwake.setChecked("1".equals(QueueDb.get(this,"keep_awake","1")));
+        root.addView(keepAwake);
+
+        root.addView(label("HIGH RELIABILITY GATE: START first performs a no-send dry-run in every enabled messenger. Search, recipient match, composer, Send control, and optional image-share route must all pass before any real queue is released.",12,0xFFFFD58A,true));
+
+        addButton(root,"▶  START HIGH RELIABILITY AUTO",0xFF00A768,()->start(false));
         addButton(root,"▶  TEST ONE QUEUE TASK",0xFF285C96,()->start(true));
         addButton(root,"Ⅱ  PAUSE / RESUME ALL",0xFFF1B950,()->{
             QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
@@ -228,6 +247,7 @@ public class MainActivity extends Activity {
         QueueDb.put(this,"message",message.getText().toString());
         QueueDb.put(this,"image_uri",imageUri);
         QueueDb.put(this,"addContacts",addContacts.isChecked()?"1":"0");
+        QueueDb.put(this,"keep_awake",keepAwake.isChecked()?"1":"0");
         QueueDb.put(this,"enabled_bale",baleEnabled.isChecked()?"1":"0");
         QueueDb.put(this,"enabled_rubika",rubikaEnabled.isChecked()?"1":"0");
         QueueDb.put(this,"enabled_eitaa",eitaaEnabled.isChecked()?"1":"0");
@@ -252,7 +272,7 @@ public class MainActivity extends Activity {
                 ", backgroundRestricted="+isBackgroundRestricted()+
                 ", batteryExempt="+isBatteryExempt());
         s.startQueue();
-        toast(testOne?"Single queue task started":"All enabled queues started");refresh();
+        toast(testOne?"Single queue task started":"Reliability dry-run started. Real queues start only after every enabled messenger passes.");refresh();
     }
 
     private int parseDelay(EditText e){
@@ -325,12 +345,13 @@ public class MainActivity extends Activity {
         access.setTextColor(ready?0xFF57E6AC:0xFFFFC27E);
         String mode=ready?QueueAccessibilityService.INSTANCE.state():"OFF";
         status.setText(QueueDb.summary(this)+"\nEngine: "+mode);
-        reliability.setText("Bale "+versionOf(packageFor("Bale"))+
-                " | Rubika "+versionOf(packageFor("Rubika"))+
-                " | Eitaa "+versionOf(packageFor("Eitaa"))+
-                "\nAndroid Restricted="+isBackgroundRestricted()+
+        reliability.setText("Bale "+versionOf(packageFor("Bale"))+" ["+QueueDb.get(this,"calib_bale","NOT CHECKED")+"]"+
+                " | Rubika "+versionOf(packageFor("Rubika"))+" ["+QueueDb.get(this,"calib_rubika","NOT CHECKED")+"]"+
+                " | Eitaa "+versionOf(packageFor("Eitaa"))+" ["+QueueDb.get(this,"calib_eitaa","NOT CHECKED")+"]"+
+                "\nReliability gate="+QueueDb.get(this,"reliability_gate_last","NOT RUN")+
+                " | Android Restricted="+isBackgroundRestricted()+
                 " | battery exemption="+isBatteryExempt()+
-                "\nSamsung: add this app to Never sleeping apps for maximum reliability.");
+                "\nSamsung: put Messenger Queue Skip in Never sleeping apps; keep Power Saving off while queues run.");
         String log=QueueDb.get(this,"logs","No events yet.");
         if(!log.equals(logs.getText().toString()))logs.setText(log);
     }
