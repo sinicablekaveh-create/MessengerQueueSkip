@@ -11,6 +11,9 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Build;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 
 /**
  * User-visible foreground watchdog for a user-started long-running queue.
@@ -23,6 +26,8 @@ public class QueueKeeperService extends Service {
     static final String ACTION_STOP="com.sinicable.messengerqueue.KEEPER_STOP";
     private static final String CHANNEL="queue_keeper";
     private static final int NOTIFICATION_ID=2401;
+    private ConnectivityManager connectivity;
+    private ConnectivityManager.NetworkCallback networkCallback;
 
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable health=new Runnable(){
@@ -58,6 +63,7 @@ public class QueueKeeperService extends Service {
     @Override public void onCreate(){
         super.onCreate();
         ensureChannel();
+        registerNetworkMonitor();
     }
 
     @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -116,6 +122,7 @@ public class QueueKeeperService extends Service {
         String state=QueueAccessibilityService.INSTANCE==null
                 ?"Waiting for Accessibility service"
                 :QueueAccessibilityService.INSTANCE.state();
+        String network="1".equals(QueueDb.get(this,"network_available","1"))?"ONLINE":"OFFLINE";
         boolean paused="1".equals(QueueDb.get(this,"desired_paused","0"));
 
         Notification.Builder b=Build.VERSION.SDK_INT>=26
@@ -123,9 +130,9 @@ public class QueueKeeperService extends Service {
                 :new Notification.Builder(this);
         b.setSmallIcon(android.R.drawable.stat_notify_sync)
          .setContentTitle("Messenger Queue Skip")
-         .setContentText(state)
+         .setContentText(state+" | "+network)
          .setStyle(new Notification.BigTextStyle().bigText(
-                 state+"\n"+QueueDb.summary(this)))
+                 state+" | Network: "+network+"\n"+QueueDb.summary(this)))
          .setOngoing(true)
          .setOnlyAlertOnce(true)
          .setCategory(Notification.CATEGORY_SERVICE)
@@ -146,8 +153,44 @@ public class QueueKeeperService extends Service {
         if(nm!=null)nm.notify(NOTIFICATION_ID,buildNotification());
     }
 
+    private void registerNetworkMonitor(){
+        try {
+            connectivity=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
+            if(connectivity==null)return;
+            networkCallback=new ConnectivityManager.NetworkCallback(){
+                @Override public void onAvailable(Network network){updateNetwork(true);}
+                @Override public void onLost(Network network){
+                    Network active=connectivity.getActiveNetwork();
+                    updateNetwork(active!=null);
+                }
+                @Override public void onCapabilitiesChanged(Network network,NetworkCapabilities caps){
+                    updateNetwork(caps!=null&&caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET));
+                }
+            };
+            connectivity.registerDefaultNetworkCallback(networkCallback);
+            Network active=connectivity.getActiveNetwork();
+            NetworkCapabilities caps=active==null?null:connectivity.getNetworkCapabilities(active);
+            updateNetwork(caps!=null&&caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET));
+        } catch(Exception e){
+            QueueDb.log(this,"Network monitor unavailable: "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void updateNetwork(boolean available){
+        String now=available?"1":"0";
+        String old=QueueDb.get(this,"network_available","1");
+        QueueDb.put(this,"network_available",now);
+        if(!now.equals(old))QueueDb.log(this,available?"Network restored":"Network lost; queue timers frozen");
+        QueueAccessibilityService a=QueueAccessibilityService.INSTANCE;
+        if(a!=null)a.networkChanged(available);
+        refreshNotification();
+    }
+
     @Override public void onDestroy(){
         handler.removeCallbacks(health);
+        try {
+            if(connectivity!=null&&networkCallback!=null)connectivity.unregisterNetworkCallback(networkCallback);
+        } catch(Exception ignored){}
         QueueDb.put(this,"keeper_health","STOPPED");
         super.onDestroy();
     }
