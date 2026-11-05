@@ -2,6 +2,7 @@ package com.sinicable.messengerqueue;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Path;
 import android.graphics.Rect;
@@ -17,26 +18,26 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Rule-based on-screen automation. It does NOT use APIs that send messages silently.
- * Only messages to explicitly imported, opt-in numbers can be attempted.
- * 'submitted' means the Send UI action succeeded, not confirmed server delivery.
+ * Three independent durable messenger queues sharing one foreground Accessibility engine.
+ * Text is verified on-screen. Optional image uses Android ACTION_SEND + EXTRA_STREAM.
+ * "submitted" means the relevant Send UI action completed, not server delivery/read receipt.
  */
 public class QueueAccessibilityService extends AccessibilityService {
     static volatile QueueAccessibilityService INSTANCE;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private static final long STEP_WAIT_MS=850;
-    private static final long ATTEMPT_TIMEOUT_MS=60000;
+    private static final long ATTEMPT_TIMEOUT_MS=70000;
     private volatile boolean running=false;
     private volatile boolean paused=false;
-    private int rowIndex=-1,attempt=0,stage=0,generation=0,safeRetries=0;
-    private long launchedAt=0,lastActionAt=0;
-    private String phone="",targetName="",targetPackage="",message="",contactAlias="";
-    private boolean triedAlias=false,newChatTapped=false,sendInProgress=false;
-    private boolean waitingForNext=false,stepScheduled=false,awaitingResult=false,testOne=false;
+
+    private int rowIndex=-1,stage=0,generation=0,safeRetries=0;
     private int processed=0,bubblesBefore=0;
-    private long sendActionAt=0,nextDueAt=0;
-    private long searchStartedAt=0;
-    private long pausedAt=0;
+    private long launchedAt=0,lastActionAt=0,sendActionAt=0,searchStartedAt=0,pausedAt=0;
+    private long nextDueAt=0;
+    private String currentMessenger="",phone="",targetName="",targetPackage="",message="",contactAlias="";
+    private String imageUri="";
+    private boolean imageMode=false,triedAlias=false,newChatTapped=false,sendInProgress=false;
+    private boolean waitingForNext=false,stepScheduled=false,awaitingResult=false,testOne=false;
     private volatile boolean diagnosticMode=false;
     private Runnable scheduled;
 
@@ -51,187 +52,210 @@ public class QueueAccessibilityService extends AccessibilityService {
                 synchronized(QueueAccessibilityService.this) {
                     if(running)return;
                     QueueDb.recoverInterrupted(this);
-                    if(QueueDb.next(this)<0) {
+                    if(!QueueDb.hasAnyPending(this)) {
                         QueueDb.put(this,"desired_running","0");
                         QueueDb.put(this,"desired_paused","0");
-                        QueueDb.log(this,"Persistent START cleared: no pending contacts");
+                        QueueDb.log(this,"Persistent START cleared: all enabled queues finished");
                         return;
                     }
+                    message=QueueDb.get(this,"message","");
+                    imageUri=QueueDb.get(this,"image_uri","");
+                    testOne=false;
+                    running=true;
+                    processed=0;
+                    diagnosticMode=false;
                     if(wantsPause) {
-                        running=true;
                         paused=true;
-                        processed=0;
-                        diagnosticMode=false;
-                        testOne=false;
-                        message=QueueDb.get(this,"message","");
                         QueueDb.log(this,"Persistent PAUSE restored after service reconnect");
                     } else {
+                        paused=false;
                         QueueDb.log(this,"Persistent START restored after service reconnect");
-                        resumePersistentQueue();
+                        scheduleEarliest(1000);
                     }
                 }
             },1200);
         }
     }
+
     @Override public void onDestroy() {
         running=false;
         generation++;
         INSTANCE=null;
         super.onDestroy();
     }
-    @Override public void onInterrupt() { /* User can pause/stop from the app. */ }
+    @Override public void onInterrupt() { }
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
         if(!running||paused)return;
         if(e.getEventType()==AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-           e.getEventType()==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            schedule(450);
-        }
+           e.getEventType()==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) schedule(450);
     }
+
     synchronized void startQueue() {
         if(running && paused) {togglePause();return;}
         if(running)return;
+        QueueDb.recoverInterrupted(this);
+        if(!QueueDb.hasAnyPending(this)) {
+            QueueDb.log(this,"START blocked: no pending item in enabled queues");
+            return;
+        }
         running=true;
         paused=false;
         processed=0;
         diagnosticMode=false;
-        QueueDb.recoverInterrupted(this);
         testOne="1".equals(QueueDb.get(this,"testOne","0"));
         message=QueueDb.get(this,"message","");
+        imageUri=QueueDb.get(this,"image_uri","");
         QueueDb.put(this,"desired_running",testOne?"0":"1");
         QueueDb.put(this,"desired_paused","0");
-        QueueDb.put(this,"next_due_wall","0");
-        QueueDb.log(this,testOne?"TEST ONE START":"START AUTOMATIC (persistent)");
-        next(1000);
+        if(!testOne) {
+            long now=System.currentTimeMillis();
+            for(String app:QueueDb.APPS) if(QueueDb.enabled(this,app) && QueueDb.due(this,app)<=0)
+                QueueDb.due(this,app,now);
+        }
+        QueueDb.log(this,testOne?"TEST ONE TASK START":"START ALL ENABLED QUEUES (persistent)");
+        scheduleEarliest(1000);
     }
 
-    private synchronized void resumePersistentQueue() {
-        if(running)return;
-        running=true;
-        paused=false;
-        processed=0;
-        diagnosticMode=false;
-        QueueDb.recoverInterrupted(this);
-        testOne=false;
-        message=QueueDb.get(this,"message","");
-        long due=readDueWall();
-        long remaining=due>0 ? Math.max(1000L,due-System.currentTimeMillis()) : 1000L;
-        QueueDb.log(this,"Persistent queue resume in "+Math.max(1L,remaining/1000L)+"s");
-        next(remaining);
-    }
-
-    private long readDueWall() {
-        try {return Long.parseLong(QueueDb.get(this,"next_due_wall","0"));}
-        catch(Exception ignored) {return 0L;}
-    }
     synchronized void togglePause() {
         if(!running) {startQueue();return;}
         paused=!paused;
-        long clock=System.currentTimeMillis();
+        long now=System.currentTimeMillis();
         if(paused) {
-            pausedAt=clock;
-        } else if(pausedAt>0) {
-            long duration=Math.max(0,clock-pausedAt);
-            launchedAt+=duration;
-            if(searchStartedAt>0)searchStartedAt+=duration;
-            if(sendActionAt>0)sendActionAt+=duration;
-            nextDueAt+=duration;
-            pausedAt=0;
+            pausedAt=now;
+        } else {
+            if(pausedAt>0) {
+                long duration=Math.max(0,now-pausedAt);
+                for(String app:QueueDb.APPS) {
+                    long due=QueueDb.due(this,app);
+                    if(due>0)QueueDb.due(this,app,due+duration);
+                }
+                launchedAt+=duration;
+                if(searchStartedAt>0)searchStartedAt+=duration;
+                if(sendActionAt>0)sendActionAt+=duration;
+                nextDueAt+=duration;
+                pausedAt=0;
+            }
         }
         QueueDb.put(this,"desired_paused",paused?"1":"0");
-        QueueDb.log(this,paused?"Queue paused (persistent)":"Queue resumed");
+        QueueDb.log(this,paused?"All queues paused (persistent)":"All queues resumed");
         if(!paused) {
-            if(waitingForNext) {
-                long remaining=Math.max(0,nextDueAt-android.os.SystemClock.elapsedRealtime());
-                next(remaining);
-            } else if(rowIndex<0) {
-                long due=readDueWall();
-                long remaining=due>0 ? Math.max(1000L,due-System.currentTimeMillis()) : 1000L;
-                next(remaining);
-            } else schedule(300);
+            if(waitingForNext) scheduleEarliest(300);
+            else schedule(300);
         }
     }
+
     synchronized void stopQueue() {
         boolean wasRunning=running;
         running=false;
         paused=false;
         QueueDb.put(this,"desired_running","0");
         QueueDb.put(this,"desired_paused","0");
-        QueueDb.put(this,"next_due_wall","0");
         generation++;
         if(scheduled!=null)handler.removeCallbacks(scheduled);
-        if(wasRunning && rowIndex>=0 && !waitingForNext &&
-                "in_flight".equals(QueueDb.state(this,rowIndex))) {
-            if(stage<4 && !sendInProgress && !awaitingResult) {
-                QueueDb.status(this,rowIndex,"pending");
-                QueueDb.log(this,"Current attempt safely returned to Pending");
-            } else {
-                QueueDb.status(this,rowIndex,"review");
-                QueueDb.log(this,"Current attempt marked REVIEW to prevent duplicate send");
+        if(wasRunning && rowIndex>=0 && !currentMessenger.isEmpty()) {
+            String state=QueueDb.state(this,rowIndex,currentMessenger);
+            if("in_flight".equals(state)) {
+                if(!imageMode && stage<4 && !sendInProgress && !awaitingResult) {
+                    QueueDb.status(this,rowIndex,currentMessenger,"pending");
+                    QueueDb.log(this,currentMessenger+" current attempt safely returned to Pending");
+                } else if(imageMode && stage<23 && !sendInProgress && !awaitingResult) {
+                    QueueDb.status(this,rowIndex,currentMessenger,"image_pending");
+                    QueueDb.log(this,currentMessenger+" image attempt safely returned to Image Pending");
+                } else {
+                    QueueDb.status(this,rowIndex,currentMessenger,"review");
+                    QueueDb.log(this,currentMessenger+" current attempt marked REVIEW to prevent duplicate send");
+                }
             }
         }
         waitingForNext=false;
-        QueueDb.log(this,"Queue stopped by user");
+        QueueDb.log(this,"All automatic queues stopped by user");
     }
+
     String state() {
-        return !running?"STOPPED":paused?"PAUSED":"RUNNING: " + targetName + " / " + phone;
+        if(!running)return "STOPPED";
+        if(paused)return "PAUSED";
+        if(waitingForNext)return "WAITING FOR NEXT DUE QUEUE";
+        return "RUNNING: "+currentMessenger+" / "+phone+(imageMode?" / IMAGE":" / TEXT");
     }
-    private void next(long delay) {
+
+    private String chooseNextMessenger() {
+        long now=System.currentTimeMillis();
+        String best="";
+        long bestDue=Long.MAX_VALUE;
+        for(String app:QueueDb.APPS) {
+            if(!QueueDb.enabled(this,app)||!QueueDb.hasPending(this,app))continue;
+            long due=QueueDb.due(this,app);
+            if(due<=0)due=now;
+            if(due<bestDue) {bestDue=due;best=app;}
+        }
+        return best;
+    }
+
+    private void scheduleEarliest(long minimumDelay) {
         if(!running||paused)return;
         if(testOne && processed>=1) {
             running=false;
             waitingForNext=false;
             QueueDb.put(this,"desired_running","0");
             QueueDb.put(this,"desired_paused","0");
-            QueueDb.put(this,"next_due_wall","0");
-            QueueDb.log(this,"TEST ONE FINISHED: check results before starting the full queue");
+            QueueDb.log(this,"TEST ONE TASK FINISHED");
             return;
         }
+        String app=chooseNextMessenger();
+        if(app.isEmpty()) {
+            running=false;
+            waitingForNext=false;
+            QueueDb.put(this,"desired_running","0");
+            QueueDb.put(this,"desired_paused","0");
+            QueueDb.log(this,"All enabled queues complete");
+            return;
+        }
+        long now=System.currentTimeMillis();
+        long due=Math.max(now,QueueDb.due(this,app));
+        long wait=Math.max(Math.max(0,minimumDelay),due-now);
         waitingForNext=true;
-        long safeDelay=Math.max(0,delay);
-        nextDueAt=android.os.SystemClock.elapsedRealtime()+safeDelay;
-        QueueDb.put(this,"next_due_wall",String.valueOf(System.currentTimeMillis()+safeDelay));
+        nextDueAt=android.os.SystemClock.elapsedRealtime()+wait;
         generation++;
         if(scheduled!=null)handler.removeCallbacks(scheduled);
         int token=generation;
         scheduled=()->{
             if(token!=generation||!running||paused)return;
             waitingForNext=false;
-            QueueDb.put(this,"next_due_wall","0");
-            rowIndex=QueueDb.next(this);
-            if(rowIndex<0){
-                running=false;
-                QueueDb.put(this,"desired_running","0");
-                QueueDb.put(this,"desired_paused","0");
-                QueueDb.put(this,"next_due_wall","0");
-                QueueDb.log(this,"Queue complete");
-                return;
-            }
+            String selected=chooseNextMessenger();
+            if(selected.isEmpty()){scheduleEarliest(0);return;}
+            long selectedDue=QueueDb.due(this,selected);
+            long remaining=Math.max(0,selectedDue-System.currentTimeMillis());
+            if(remaining>250) {scheduleEarliest(remaining);return;}
+            currentMessenger=selected;
+            targetName=selected;
+            targetPackage=packageFor(selected);
+            rowIndex=QueueDb.next(this,selected);
+            if(rowIndex<0){scheduleEarliest(0);return;}
             phone=QueueDb.phone(this,rowIndex);
-            QueueDb.status(this,rowIndex,"in_flight"); // durable crash-safe reservation
-            attempt=0;
+            String state=QueueDb.state(this,rowIndex,selected);
             safeRetries=0;
-            launchCurrent();
+            if("image_pending".equals(state)) {
+                launchImageShare();
+            } else {
+                QueueDb.status(this,rowIndex,selected,"in_flight");
+                launchText();
+            }
         };
-        handler.postDelayed(scheduled,delay);
+        handler.postDelayed(scheduled,wait);
     }
+
     private String packageFor(String app) {
         switch(app) {
             case "Bale":return "ir.nasim";
             case "Rubika":return "app.rbmain.a";
             case "Eitaa":return "ir.eitaa.messenger";
-            case "Telegram":return "org.telegram.messenger";
-            case "WhatsApp":return "com.whatsapp";
             default:return "";
         }
     }
-    private void launchCurrent() {
-        if(!running||paused)return;
-        generation++; // invalidate callbacks from the previous messenger attempt
-        targetName=attempt==0?QueueDb.get(this,"primary","Bale"):
-                QueueDb.get(this,"fallback","None");
-        targetPackage=packageFor(targetName);
-        if(targetPackage.isEmpty()) {skip("No fallback app configured");return;}
-        stage=0;
+
+    private void resetAttempt(boolean image) {
+        imageMode=image;
+        stage=image?20:0;
         lastActionAt=0;
         searchStartedAt=0;
         triedAlias=false;
@@ -241,67 +265,97 @@ public class QueueAccessibilityService extends AccessibilityService {
         contactAlias="1".equals(QueueDb.get(this,"addContacts","0"))
                 ? ContactBridge.ensure(this,phone):"";
         launchedAt=System.currentTimeMillis();
-        QueueDb.log(this,"Attempt " + (attempt+1) + " " + targetName + " -> " + phone);
+    }
+
+    private void launchText() {
+        if(!running||paused)return;
+        generation++;
+        resetAttempt(false);
+        QueueDb.log(this,"TEXT "+currentMessenger+" -> "+phone);
         try {
-            Intent open;
-            if("WhatsApp".equals(targetName)) {
-                Uri u=new Uri.Builder().scheme("https").authority("wa.me")
-                        .appendPath(ContactImporter.international(phone))
-                        .appendQueryParameter("text",message).build();
-                open=new Intent(Intent.ACTION_VIEW,u);
-                open.setPackage("com.whatsapp");
-                stage=4; // Phone deep-link should pre-fill the text in the chosen conversation.
-            } else {
-                open=getPackageManager().getLaunchIntentForPackage(targetPackage);
-                if(open==null) {failAttempt("App not installed or launcher missing");return;}
-            }
+            Intent open=getPackageManager().getLaunchIntentForPackage(targetPackage);
+            if(open==null){failAttempt("App not installed or launcher missing");return;}
             open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
             startActivity(open);
             schedule(1700);
-        } catch(Exception ex) {failAttempt("Cannot open app: " + ex.getClass().getSimpleName());}
+        } catch(Exception ex){failAttempt("Cannot open app: "+ex.getClass().getSimpleName());}
     }
-    private synchronized void failAttempt(String reason) {
-        if(!running)return;
-        if(sendInProgress || awaitingResult) {
-            markReview("Could not confirm Send on screen: " + reason);
+
+    private void launchImageShare() {
+        if(!running||paused)return;
+        if(imageUri==null||imageUri.trim().isEmpty()) {
+            completeTask("Text UI confirmed; no image selected");
             return;
         }
-        QueueDb.log(this,"Attempt failed: " + reason);
+        generation++;
+        resetAttempt(true);
+        QueueDb.status(this,rowIndex,currentMessenger,"in_flight");
+        QueueDb.log(this,"IMAGE "+currentMessenger+" -> "+phone);
+        try {
+            Uri image=Uri.parse(imageUri);
+            grantUriPermission(targetPackage,image,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Intent share=new Intent(Intent.ACTION_SEND);
+            share.setPackage(targetPackage);
+            share.setType("image/*");
+            share.putExtra(Intent.EXTRA_STREAM,image);
+            share.setClipData(ClipData.newRawUri("image",image));
+            share.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(share);
+            schedule(1800);
+        } catch(Exception ex){
+            QueueDb.status(this,rowIndex,currentMessenger,"image_pending");
+            failAttempt("Cannot share image: "+ex.getClass().getSimpleName());
+        }
+    }
+
+    private synchronized void failAttempt(String reason) {
+        if(!running||rowIndex<0)return;
+        if(sendInProgress||awaitingResult) {
+            markReview("Could not confirm Send on screen: "+reason);
+            return;
+        }
+        QueueDb.log(this,currentMessenger+" attempt failed: "+reason);
         if(safeRetries<2) {
             safeRetries++;
-            QueueDb.log(this,"SAFE RETRY "+safeRetries+"/2 before any Send action");
+            QueueDb.log(this,currentMessenger+" SAFE RETRY "+safeRetries+"/2 before Send");
             generation++;
             int token=generation;
             handler.postDelayed(()->{
-                if(running && !paused && token==generation) launchCurrent();
-            },1200);
+                if(!running||paused||token!=generation)return;
+                if(imageMode)launchImageShare(); else launchText();
+            },1400);
             return;
         }
-        String fallback=QueueDb.get(this,"fallback","None");
-        String primary=QueueDb.get(this,"primary","Bale");
-        if(attempt==0 && !"None".equals(fallback) && !fallback.equals(primary)) {
-            attempt=1;
-            safeRetries=0;
-            generation++;
-            int token=generation;
-            handler.postDelayed(()->{if(running && !paused && token==generation) launchCurrent();},900);
-        } else skip("No compatible chat / Skip");
-    }
-    private synchronized void skip(String why) {
-        if(rowIndex<0)return;
-        QueueDb.status(this,rowIndex,"skipped");
-        QueueDb.log(this,"SKIP " + phone + ": " + why);
+        if(imageMode) {
+            QueueDb.status(this,rowIndex,currentMessenger,"review");
+            QueueDb.log(this,"REVIEW "+phone+" via "+currentMessenger+": image could not be sent safely");
+        } else {
+            QueueDb.status(this,rowIndex,currentMessenger,"skipped");
+            QueueDb.log(this,"SKIP "+phone+" via "+currentMessenger+": "+reason);
+        }
         processed++;
-        next(delayMs());
+        finishMessengerSlot();
     }
-    private long delayMs() {
-        int d=3;
-        try {d=Integer.parseInt(QueueDb.get(this,"delay","3"));}
-        catch(Exception ignored) {}
-        return Math.max(1,Math.min(1440,d))*60000L;
+
+    private long delayMs(String app) {
+        return QueueDb.delayMinutes(this,app)*60000L;
     }
+
+    private void finishMessengerSlot() {
+        QueueDb.due(this,currentMessenger,System.currentTimeMillis()+delayMs(currentMessenger));
+        imageMode=false;
+        sendInProgress=false;
+        awaitingResult=false;
+        rowIndex=-1;
+        phone="";
+        currentMessenger="";
+        targetName="";
+        targetPackage="";
+        scheduleEarliest(500);
+    }
+
     private void schedule(long ms) {
-        if(stepScheduled || waitingForNext || !running || paused)return;
+        if(stepScheduled||waitingForNext||!running||paused)return;
         stepScheduled=true;
         int token=generation;
         handler.postDelayed(()->{
@@ -309,165 +363,206 @@ public class QueueAccessibilityService extends AccessibilityService {
             if(token==generation&&running&&!paused&&!waitingForNext)step();
         },ms);
     }
+
     private void step() {
         if(!running||paused||waitingForNext)return;
         long now=System.currentTimeMillis();
-        if(now-launchedAt>ATTEMPT_TIMEOUT_MS) {failAttempt("Timed out waiting for verified chat");return;}
-        if(now-lastActionAt<STEP_WAIT_MS) {schedule(STEP_WAIT_MS);return;}
+        if(now-launchedAt>ATTEMPT_TIMEOUT_MS){failAttempt("Timed out waiting for verified UI");return;}
+        if(now-lastActionAt<STEP_WAIT_MS){schedule(STEP_WAIT_MS);return;}
         AccessibilityNodeInfo root=targetWindowRoot();
         if(root==null){schedule(1000);return;}
         try {
-            if(!targetPackage.equals(String.valueOf(root.getPackageName()))) {
-                schedule(900);return;
-            }
-            if(stage==0) {
+            if(!targetPackage.equals(String.valueOf(root.getPackageName()))){schedule(900);return;}
+
+            if(stage==0||stage==20) {
                 AccessibilityNodeInfo search=findByWords(root,
                         new String[]{"search","جستجو","جست و جو","search_icon","search_button","ic_search"},true);
-                if(search!=null && click(search)) {
-                    stage=1;lastActionAt=now;schedule(800);return;
+                if(search!=null&&click(search)){
+                    stage=imageMode?21:1;lastActionAt=now;schedule(800);return;
                 }
-                if(findSearchEditor(root)!=null) {
-                    stage=1;schedule(250);return;
-                }
-                // Some versions hide search inside the 'new chat' or pencil action.
+                if(findSearchEditor(root)!=null){stage=imageMode?21:1;schedule(250);return;}
                 if(!newChatTapped) {
                     AccessibilityNodeInfo newChat=findByWords(root,
-                            new String[]{"new chat","new message","پیام جدید","گفتگوی جدید",
-                                    "گفت و گوی جدید","compose","ic_edit","fab"},true);
-                    if(newChat!=null && click(newChat)) {
+                            new String[]{"new chat","new message","پیام جدید","گفتگوی جدید","گفت و گوی جدید","compose","ic_edit","fab"},true);
+                    if(newChat!=null&&click(newChat)){
                         newChatTapped=true;lastActionAt=now;schedule(900);return;
                     }
                 }
-            } else if(stage==1) {
+            } else if(stage==1||stage==21) {
                 AccessibilityNodeInfo input=findSearchEditor(root);
                 String query=triedAlias?contactAlias:phone;
-                if(input!=null && !query.isEmpty() && setText(input,query)) {
-                    stage=2;searchStartedAt=now;lastActionAt=now;schedule(1500);return;
+                if(input!=null&&!query.isEmpty()&&setText(input,query)){
+                    stage=imageMode?22:2;searchStartedAt=now;lastActionAt=now;schedule(1500);return;
                 }
-            } else if(stage==2) {
-                AccessibilityNodeInfo match=findVerifiedResult(root,phone,
-                        triedAlias?contactAlias:"");
-                if(match!=null && click(match)) {
-                    stage=3;lastActionAt=now;
-                    QueueDb.log(this,"Matched verified contact in "+targetName);
-                    schedule(1100);return;
+            } else if(stage==2||stage==22) {
+                AccessibilityNodeInfo match=findVerifiedResult(root,phone,triedAlias?contactAlias:"");
+                if(match!=null&&click(match)){
+                    stage=imageMode?23:3;lastActionAt=now;
+                    QueueDb.log(this,"Matched verified contact in "+currentMessenger);
+                    schedule(1200);return;
                 }
-                if(!triedAlias && !contactAlias.isEmpty()
-                        && now-searchStartedAt>9000) {
-                    triedAlias=true;stage=1;
-                    QueueDb.log(this,"Searching synced contact alias in "+targetName);
+                if(!triedAlias&&!contactAlias.isEmpty()&&now-searchStartedAt>9000){
+                    triedAlias=true;stage=imageMode?21:1;
+                    QueueDb.log(this,"Searching synced contact alias in "+currentMessenger);
                     schedule(300);return;
                 }
             } else if(stage==3) {
                 AccessibilityNodeInfo composer=findChatComposer(root);
-                if(composer!=null && setText(composer,message)) {
+                if(composer!=null&&setText(composer,message)){
                     stage=4;lastActionAt=now;schedule(900);return;
                 }
             } else if(stage==4) {
                 if(sendInProgress)return;
                 AccessibilityNodeInfo composer=findChatComposer(root);
-                if(composer!=null && message.contentEquals(composer.getText()==null
-                        ? "" : composer.getText())) {
+                if(composer!=null&&message.contentEquals(composer.getText()==null?"":composer.getText())){
                     AccessibilityNodeInfo send=findSendNearComposer(root,composer);
-                    if(send!=null) {
+                    if(send!=null){
                         bubblesBefore=countVisibleMessage(root,message);
                         sendInProgress=true;
-                        clickSend(send);
+                        clickSend(send,false);
                         return;
                     }
                 }
             } else if(stage==5) {
-                if(now-sendActionAt>=1500) {
+                if(now-sendActionAt>=1500){
                     AccessibilityNodeInfo editor=findChatComposer(root);
                     String draft=editor==null||editor.getText()==null?"":editor.getText().toString();
-                    if(draft.trim().isEmpty() && countVisibleMessage(root,message)>bubblesBefore) {
-                        finishSubmitted("UI composer cleared and message bubble visible");
+                    if(draft.trim().isEmpty()&&countVisibleMessage(root,message)>bubblesBefore){
+                        finishTextSubmitted("composer cleared and text bubble visible");
                         return;
                     }
-                    if(now-sendActionAt>9000) {
-                        markReview("Send action occurred but message bubble could not be verified");
-                        return;
-                    }
+                    if(now-sendActionAt>9000){markReview("Text Send occurred but message bubble was not verified");return;}
+                }
+            } else if(stage==23) {
+                if(sendInProgress)return;
+                AccessibilityNodeInfo send=findGenericSend(root);
+                if(send!=null){
+                    sendInProgress=true;
+                    clickSend(send,true);
+                    return;
+                }
+                if(now-lastActionAt>9000){
+                    markReview("Image recipient selected but a trustworthy Send control was not found");
+                    return;
+                }
+            } else if(stage==24) {
+                if(now-sendActionAt>2500){
+                    completeTask("Text verified + image Send UI action completed");
+                    return;
                 }
             }
-        } catch(Exception e) {
-            QueueDb.log(this,"UI engine error at step "+stage+": "+e.getClass().getSimpleName());
+        } catch(Exception e){
+            QueueDb.log(this,"UI engine error at stage "+stage+": "+e.getClass().getSimpleName());
         } finally {root.recycle();}
         schedule(900);
     }
 
-    private void clickSend(AccessibilityNodeInfo target) {
+    private void clickSend(AccessibilityNodeInfo target,boolean imageSend) {
         final int token=generation;
         final int sendingRow=rowIndex;
-        if(target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            beginVerification();
-            return;
+        if(target.performAction(AccessibilityNodeInfo.ACTION_CLICK)){
+            beginVerification(imageSend);return;
         }
         Rect r=new Rect();target.getBoundsInScreen(r);
-        if(r.isEmpty()) {sendInProgress=false;return;}
+        if(r.isEmpty()){sendInProgress=false;return;}
         Path p=new Path();p.moveTo(r.centerX(),r.centerY());
-        GestureDescription.StrokeDescription stroke=
-                new GestureDescription.StrokeDescription(p,0,100);
+        GestureDescription.StrokeDescription stroke=new GestureDescription.StrokeDescription(p,0,100);
         try {
             boolean initiated=dispatchGesture(
                     new GestureDescription.Builder().addStroke(stroke).build(),
-                    new GestureResultCallback() {
-                        @Override public void onCompleted(GestureDescription g) {
-                            if(token==generation && sendingRow==rowIndex && running)
-                                beginVerification();
+                    new GestureResultCallback(){
+                        @Override public void onCompleted(GestureDescription g){
+                            if(token==generation&&sendingRow==rowIndex&&running)beginVerification(imageSend);
                         }
-                        @Override public void onCancelled(GestureDescription g) {
-                            if(token==generation && sendingRow==rowIndex) {
+                        @Override public void onCancelled(GestureDescription g){
+                            if(token==generation&&sendingRow==rowIndex){
                                 sendInProgress=false;
                                 QueueDb.log(QueueAccessibilityService.this,"Send gesture cancelled");
                             }
                         }
                     },handler);
             if(!initiated)sendInProgress=false;
-        } catch(Exception ex) {
+        } catch(Exception ex){
             sendInProgress=false;
             QueueDb.log(this,"Send gesture failed: "+ex.getClass().getSimpleName());
         }
     }
-    private void beginVerification() {
-        stage=5;
+
+    private void beginVerification(boolean imageSend) {
+        stage=imageSend?24:5;
         sendActionAt=System.currentTimeMillis();
         awaitingResult=true;
-        QueueDb.log(this,"Send action invoked; verifying chat UI...");
-        schedule(1100);
+        QueueDb.log(this,(imageSend?"Image":"Text")+" Send action invoked; verifying UI...");
+        schedule(imageSend?1600:1100);
     }
+
     private int countVisibleMessage(AccessibilityNodeInfo root,String target) {
         List<AccessibilityNodeInfo> nodes=new ArrayList<>();
         collect(root,nodes,0,40);
         int count=0;
-        for(AccessibilityNodeInfo node:nodes) {
+        for(AccessibilityNodeInfo node:nodes){
             if(node.isEditable()||!node.isVisibleToUser())continue;
             String txt=node.getText()==null?"":node.getText().toString();
             if(target.equals(txt))count++;
         }
         return count;
     }
+
     private synchronized void markReview(String reason) {
-        if(!running || rowIndex<0)return;
-        QueueDb.status(this,rowIndex,"review");
-        QueueDb.log(this,"REVIEW REQUIRED "+phone+" via "+targetName+": "+reason);
-        sendInProgress=false;
-        awaitingResult=false;
-        running=false;
-        paused=false;
-        QueueDb.put(this,"desired_running","0");
-        QueueDb.put(this,"desired_paused","0");
-        QueueDb.put(this,"next_due_wall","0");
-        generation++;
-    }
-    private synchronized void finishSubmitted(String detail) {
-        if(!running || rowIndex<0)return;
-        QueueDb.status(this,rowIndex,"submitted");
-        QueueDb.log(this,"SUBMITTED "+phone+" via "+targetName+" ("+detail+")");
-        sendInProgress=false;
-        awaitingResult=false;
+        if(!running||rowIndex<0)return;
+        QueueDb.status(this,rowIndex,currentMessenger,"review");
+        QueueDb.log(this,"REVIEW REQUIRED "+phone+" via "+currentMessenger+": "+reason);
         processed++;
-        next(delayMs());
+        finishMessengerSlot();
+    }
+
+    private synchronized void finishTextSubmitted(String detail) {
+        if(!running||rowIndex<0)return;
+        QueueDb.log(this,"TEXT UI CONFIRMED "+phone+" via "+currentMessenger+" ("+detail+")");
+        sendInProgress=false;
+        awaitingResult=false;
+        if(imageUri!=null&&!imageUri.trim().isEmpty()){
+            QueueDb.status(this,rowIndex,currentMessenger,"image_pending");
+            handler.postDelayed(()->{
+                if(running&&!paused&&rowIndex>=0)launchImageShare();
+            },800);
+        } else {
+            completeTask("Text UI confirmed");
+        }
+    }
+
+    private synchronized void completeTask(String detail) {
+        if(!running||rowIndex<0)return;
+        QueueDb.status(this,rowIndex,currentMessenger,"submitted");
+        QueueDb.log(this,"SUBMITTED "+phone+" via "+currentMessenger+" ("+detail+")");
+        processed++;
+        finishMessengerSlot();
+    }
+
+    private AccessibilityNodeInfo findGenericSend(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> nodes=new ArrayList<>();
+        collect(root,nodes,0,40);
+        int h=getResources().getDisplayMetrics().heightPixels;
+        AccessibilityNodeInfo best=null;
+        int bestY=-1;
+        for(AccessibilityNodeInfo n:nodes){
+            if(!n.isEnabled()||!n.isVisibleToUser()||n.isEditable())continue;
+            String title=str(n.getText()).trim();
+            String desc=str(n.getContentDescription()).trim();
+            String id=str(n.getViewIdResourceName());
+            boolean match=title.equals("send")||title.equals("ارسال")||
+                    desc.equals("send")||desc.equals("send message")||
+                    desc.equals("ارسال")||desc.equals("ارسال پیام")||
+                    id.endsWith("/send")||id.endsWith("/send_button")||
+                    id.endsWith("/btn_send")||id.endsWith("/ic_send")||
+                    (id.contains("send")&&!id.contains("resend")&&!id.contains("send_as"));
+            if(!match)continue;
+            Rect r=new Rect();n.getBoundsInScreen(r);
+            if(r.isEmpty()||r.centerY()<h*0.35)continue;
+            AccessibilityNodeInfo action=clickable(n);
+            if(action!=null&&r.centerY()>bestY){best=action;bestY=r.centerY();}
+        }
+        return best;
     }
 
     /** Retrieve the foreground messenger window even if the on-screen keyboard has focus. */
