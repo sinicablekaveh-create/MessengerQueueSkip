@@ -37,7 +37,7 @@ jobs:
           python3 - "$OUT/AndroidManifest.xml" <<'PY'
           import pathlib,sys
           text=pathlib.Path("app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
-          text=text.replace('<manifest xmlns:android=', '<manifest package="com.sinicable.messengerqueue" android:versionCode="5" android:versionName="1.4.0" xmlns:android=',1)
+          text=text.replace('<manifest xmlns:android=', '<manifest package="com.sinicable.messengerqueue" android:versionCode="6" android:versionName="1.5.0" xmlns:android=',1)
           pathlib.Path(sys.argv[1]).write_text(text,encoding="utf-8")
           PY
           "$TOOLS/aapt2" compile --dir app/src/main/res -o "$OUT/resources.zip"
@@ -51,10 +51,10 @@ jobs:
           PY
           "$TOOLS/zipalign" -f -p 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
           keytool -genkeypair -keystore "$OUT/debug.keystore" -alias androiddebugkey -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 3650 -noprompt
-          "$TOOLS/apksigner" sign --ks "$OUT/debug.keystore" --ks-pass pass:android --key-pass pass:android --out "$ROOT/app/build/outputs/apk/debug/MessengerQueueSkip-v1.4.0.apk" "$OUT/aligned.apk"
-          "$TOOLS/apksigner" verify --verbose "$ROOT/app/build/outputs/apk/debug/MessengerQueueSkip-v1.4.0.apk"
+          "$TOOLS/apksigner" sign --ks "$OUT/debug.keystore" --ks-pass pass:android --key-pass pass:android --out "$ROOT/app/build/outputs/apk/debug/MessengerQueueSkip-v1.5.0.apk" "$OUT/aligned.apk"
+          "$TOOLS/apksigner" verify --verbose "$ROOT/app/build/outputs/apk/debug/MessengerQueueSkip-v1.5.0.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: MessengerQueueSkip-v1.4.0-APK
-          path: app/build/outputs/apk/debug/MessengerQueueSkip-v1.4.0.apk
+          name: MessengerQueueSkip-v1.5.0-APK
+          path: app/build/outputs/apk/debug/MessengerQueueSkip-v1.5.0.apk
           if-no-files-found: error
