@@ -56,15 +56,27 @@ final class ContactBridge {
                     .withValue(ContactsContract.Data.MIMETYPE,
                             CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
                     .withValue(CommonDataKinds.StructuredName.DISPLAY_NAME, name).build());
+            String local=ContactImporter.phone(phone);
+            String intl=ContactImporter.international(local);
             ops.add(ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
                     .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
                     .withValue(ContactsContract.Data.MIMETYPE,
                             CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
-                    .withValue(CommonDataKinds.Phone.NUMBER, phone)
+                    .withValue(CommonDataKinds.Phone.NUMBER, local.isEmpty()?phone:local)
                     .withValue(CommonDataKinds.Phone.TYPE, CommonDataKinds.Phone.TYPE_MOBILE).build());
+            if(intl!=null&&!intl.isEmpty()&&!intl.equals(local)) {
+                String e164=intl.startsWith("+")?intl:("+"+intl);
+                ops.add(ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                        .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                        .withValue(ContactsContract.Data.MIMETYPE,
+                                CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+                        .withValue(CommonDataKinds.Phone.NUMBER, e164)
+                        .withValue(CommonDataKinds.Phone.TYPE, CommonDataKinds.Phone.TYPE_MOBILE).build());
+            }
             c.getContentResolver().applyBatch(ContactsContract.AUTHORITY, ops);
+            try {c.getContentResolver().notifyChange(ContactsContract.Contacts.CONTENT_URI,null);} catch(Exception ignored) {}
             QueueDb.put(c, key, "ok");
-            QueueDb.log(c, "Created optional phone contact " + name);
+            QueueDb.log(c, "Created optional phone contact " + name + " with local/international number forms");
             return name;
         } catch (Exception ex) {
             QueueDb.log(c, "Cannot create phone contact: " + ex.getClass().getSimpleName());
