@@ -160,7 +160,7 @@ public class MainActivity extends Activity {
 
         root.addView(label("HIGH RELIABILITY GATE: START first performs a no-send dry-run in every enabled messenger. Search, recipient match, composer, Send control, and optional image-share route must all pass before any real queue is released.",12,0xFFFFD58A,true));
 
-        addButton(root,"▶  START HIGH RELIABILITY AUTO",0xFF00A768,()->start(false));
+        addButton(root,"▶  START AUTOMATIC",0xFF00A768,()->start(false));
         addButton(root,"▶  TEST ONE QUEUE TASK",0xFF285C96,()->start(true));
         addButton(root,"Ⅱ  PAUSE / RESUME ALL",0xFFF1B950,()->{
             QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
@@ -569,9 +569,24 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume(){
         super.onResume();
-        QueueDb.put(this,"pending_prompt","");
         handler.post(ticker);
-        handler.postDelayed(this::continueAutomaticStart,700);
+        handler.postDelayed(()->{
+            if("1".equals(QueueDb.get(this,"pending_auto_start","0"))) {
+                String prompt=QueueDb.get(this,"pending_prompt","");
+                boolean satisfied=
+                        ("accessibility".equals(prompt)&&QueueAccessibilityService.INSTANCE!=null) ||
+                        ("battery".equals(prompt)&&isBatteryExempt()) ||
+                        ("background".equals(prompt)&&!isBackgroundRestricted()) ||
+                        ("network".equals(prompt)&&"1".equals(QueueDb.get(this,"network_available","1"))) ||
+                        prompt.isEmpty();
+                if(satisfied) {
+                    QueueDb.put(this,"pending_prompt","");
+                    continueAutomaticStart();
+                } else {
+                    toast("START is saved. Complete the requested system setting, then return here.");
+                }
+            }
+        },700);
     }
     @Override protected void onPause(){handler.removeCallbacks(ticker);super.onPause();}
 
