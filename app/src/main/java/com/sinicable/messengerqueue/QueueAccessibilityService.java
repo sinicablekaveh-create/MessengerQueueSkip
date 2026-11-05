@@ -69,6 +69,7 @@ public class QueueAccessibilityService extends AccessibilityService {
                     imageUri=QueueDb.get(this,"image_uri","");
                     testOne=false;
                     running=true;
+                    acquireQueueWakeLock();
                     processed=0;
                     diagnosticMode=false;
                     if(wantsPause) {
@@ -221,6 +222,7 @@ public class QueueAccessibilityService extends AccessibilityService {
             QueueDb.put(this,"desired_running","0");
             QueueDb.put(this,"desired_paused","0");
             QueueDb.log(this,"All enabled queues complete");
+            releaseQueueWakeLock();
             return;
         }
         long now=System.currentTimeMillis();
@@ -379,6 +381,7 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void step() {
         if(!running||paused||waitingForNext)return;
+        if(calibrationMode){calibrationStep();return;}
         long now=System.currentTimeMillis();
         if(now-launchedAt>ATTEMPT_TIMEOUT_MS){failAttempt("Timed out waiting for verified UI");return;}
         if(now-lastActionAt<STEP_WAIT_MS){schedule(STEP_WAIT_MS);return;}
@@ -550,6 +553,264 @@ public class QueueAccessibilityService extends AccessibilityService {
         QueueDb.log(this,"SUBMITTED "+phone+" via "+currentMessenger+" ("+detail+")");
         processed++;
         finishMessengerSlot();
+    }
+
+
+    private void acquireQueueWakeLock() {
+        try {
+            if(queueWakeLock!=null&&queueWakeLock.isHeld())return;
+            PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
+            if(pm==null)return;
+            int flags=PowerManager.PARTIAL_WAKE_LOCK;
+            if("1".equals(QueueDb.get(this,"keep_awake","1"))) {
+                flags=PowerManager.SCREEN_BRIGHT_WAKE_LOCK|PowerManager.ACQUIRE_CAUSES_WAKEUP|PowerManager.ON_AFTER_RELEASE;
+            }
+            queueWakeLock=pm.newWakeLock(flags,"MessengerQueueSkip:Queue");
+            queueWakeLock.setReferenceCounted(false);
+            queueWakeLock.acquire();
+            QueueDb.log(this,"Queue wake lock acquired");
+        } catch(Exception e) {
+            QueueDb.log(this,"Wake lock unavailable: "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void releaseQueueWakeLock() {
+        try {
+            if(queueWakeLock!=null&&queueWakeLock.isHeld())queueWakeLock.release();
+        } catch(Exception ignored) {}
+        queueWakeLock=null;
+    }
+
+    private void beginCalibration() {
+        calibrationApps.clear();
+        for(String app:QueueDb.APPS) {
+            if(QueueDb.enabled(this,app)&&QueueDb.hasPending(this,app)) {
+                calibrationApps.add(app);
+                QueueDb.put(this,"calib_"+app.toLowerCase(Locale.US),"WAITING");
+            }
+        }
+        calibrationIndex=0;
+        calibrationRetries=0;
+        calibrationMode=true;
+        if(calibrationApps.isEmpty()) {
+            calibrationFail("No enabled queue has a pending contact");
+            return;
+        }
+        launchCalibrationCurrent();
+    }
+
+    private void launchCalibrationCurrent() {
+        if(!running||paused)return;
+        if(calibrationIndex>=calibrationApps.size()) {
+            calibrationSuccessAll();
+            return;
+        }
+        currentMessenger=calibrationApps.get(calibrationIndex);
+        targetName=currentMessenger;
+        targetPackage=packageFor(currentMessenger);
+        rowIndex=QueueDb.next(this,currentMessenger);
+        if(rowIndex<0) {
+            calibrationPassCurrent("No pending contact remained");
+            return;
+        }
+        phone=QueueDb.phone(this,rowIndex);
+        resetAttempt(false);
+        stage=100;
+        calibrationMode=true;
+        QueueDb.put(this,"calib_"+currentMessenger.toLowerCase(Locale.US),"CHECKING");
+        QueueDb.log(this,"RELIABILITY DRY-RUN "+currentMessenger+" -> "+phone+" (NO SEND)");
+        try {
+            Intent open=getPackageManager().getLaunchIntentForPackage(targetPackage);
+            if(open==null){calibrationFail("Launcher missing for "+currentMessenger);return;}
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(open);
+            schedule(1700);
+        } catch(Exception e) {
+            calibrationFail("Cannot open "+currentMessenger+": "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void calibrationStep() {
+        if(!calibrationMode||!running||paused)return;
+        long now=System.currentTimeMillis();
+        if(now-launchedAt>60000L) {
+            calibrationFail("Dry-run timeout at stage "+stage);
+            return;
+        }
+        if(now-lastActionAt<STEP_WAIT_MS){schedule(STEP_WAIT_MS);return;}
+        AccessibilityNodeInfo root=targetWindowRoot();
+        if(root==null){schedule(850);return;}
+        try {
+            if(!targetPackage.equals(String.valueOf(root.getPackageName()))){schedule(750);return;}
+
+            if(stage==100||stage==120) {
+                AccessibilityNodeInfo search=findByWords(root,
+                        new String[]{"search","جستجو","جست و جو","search_icon","search_button","ic_search"},true);
+                if(search!=null&&click(search)) {
+                    stage=stage==120?121:101;lastActionAt=now;schedule(700);return;
+                }
+                if(findSearchEditor(root)!=null) {
+                    stage=stage==120?121:101;schedule(200);return;
+                }
+                if(!newChatTapped) {
+                    AccessibilityNodeInfo newChat=findByWords(root,
+                            new String[]{"new chat","new message","پیام جدید","گفتگوی جدید",
+                                    "گفت و گوی جدید","compose","ic_edit","fab"},true);
+                    if(newChat!=null&&click(newChat)) {
+                        newChatTapped=true;lastActionAt=now;schedule(800);return;
+                    }
+                }
+            } else if(stage==101||stage==121) {
+                AccessibilityNodeInfo input=findSearchEditor(root);
+                String query=triedAlias?contactAlias:phone;
+                if(input!=null&&!query.isEmpty()&&setText(input,query)) {
+                    stage=stage==121?122:102;searchStartedAt=now;lastActionAt=now;schedule(1200);return;
+                }
+            } else if(stage==102||stage==122) {
+                AccessibilityNodeInfo match=findVerifiedResult(root,phone,triedAlias?contactAlias:"");
+                if(match!=null&&click(match)) {
+                    stage=stage==122?123:103;
+                    lastActionAt=now;
+                    schedule(1000);
+                    return;
+                }
+                if(!triedAlias&&!contactAlias.isEmpty()&&now-searchStartedAt>7000) {
+                    triedAlias=true;
+                    stage=stage==122?121:101;
+                    schedule(250);return;
+                }
+            } else if(stage==103) {
+                AccessibilityNodeInfo composer=findChatComposer(root);
+                if(composer!=null&&setText(composer,calibrationProbe)) {
+                    stage=104;lastActionAt=now;schedule(650);return;
+                }
+            } else if(stage==104) {
+                AccessibilityNodeInfo composer=findChatComposer(root);
+                if(composer!=null&&calibrationProbe.contentEquals(
+                        composer.getText()==null?"":composer.getText())) {
+                    AccessibilityNodeInfo send=findSendNearComposer(root,composer);
+                    if(send!=null) {
+                        setText(composer,"");
+                        QueueDb.log(this,"DRY-RUN "+currentMessenger+": text route PASS");
+                        if(imageUri!=null&&!imageUri.trim().isEmpty()) {
+                            handler.postDelayed(this::launchCalibrationImage,500);
+                        } else {
+                            calibrationPassCurrent("text route");
+                        }
+                        return;
+                    }
+                }
+            } else if(stage==123) {
+                AccessibilityNodeInfo send=findGenericSend(root);
+                if(send!=null) {
+                    QueueDb.log(this,"DRY-RUN "+currentMessenger+": image route PASS");
+                    performGlobalAction(GLOBAL_ACTION_BACK);
+                    handler.postDelayed(()->performGlobalAction(GLOBAL_ACTION_BACK),300);
+                    calibrationPassCurrent("text + image routes");
+                    return;
+                }
+            }
+        } catch(Exception e) {
+            QueueDb.log(this,"Dry-run UI error "+currentMessenger+" stage "+stage+": "+e.getClass().getSimpleName());
+        } finally {root.recycle();}
+        schedule(700);
+    }
+
+    private void launchCalibrationImage() {
+        if(!calibrationMode||!running||paused)return;
+        try {
+            imageMode=true;
+            triedAlias=false;
+            newChatTapped=false;
+            searchStartedAt=0;
+            lastActionAt=0;
+            launchedAt=System.currentTimeMillis();
+            stage=120;
+            Uri image=Uri.parse(imageUri);
+            grantUriPermission(targetPackage,image,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Intent share=new Intent(Intent.ACTION_SEND);
+            share.setPackage(targetPackage);
+            share.setType("image/*");
+            share.putExtra(Intent.EXTRA_STREAM,image);
+            share.setClipData(ClipData.newRawUri("image",image));
+            share.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(share);
+            schedule(1500);
+        } catch(Exception e) {
+            calibrationFail("Image dry-run failed: "+e.getClass().getSimpleName());
+        }
+    }
+
+    private void calibrationPassCurrent(String detail) {
+        if(!calibrationMode)return;
+        String key=currentMessenger.toLowerCase(Locale.US);
+        QueueDb.put(this,"calib_"+key,"PASS");
+        QueueDb.put(this,"calib_version_"+key,versionFingerprint(targetPackage));
+        QueueDb.put(this,"calib_image_"+key,(imageUri==null||imageUri.isEmpty())?"0":"1");
+        QueueDb.put(this,"calib_time_"+key,String.valueOf(System.currentTimeMillis()));
+        QueueDb.log(this,"RELIABILITY PASS "+currentMessenger+" ("+detail+")");
+        imageMode=false;
+        calibrationRetries=0;
+        calibrationIndex++;
+        generation++;
+        int token=generation;
+        handler.postDelayed(()->{
+            if(token==generation&&running&&!paused)launchCalibrationCurrent();
+        },650);
+    }
+
+    private void calibrationFail(String reason) {
+        if(!running)return;
+        if(calibrationMode&&calibrationIndex<calibrationApps.size()&&calibrationRetries<2) {
+            calibrationRetries++;
+            QueueDb.log(this,"DRY-RUN RETRY "+calibrationRetries+"/2 "+currentMessenger+": "+reason);
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            generation++;
+            int token=generation;
+            handler.postDelayed(()->{
+                if(token==generation&&running&&!paused)launchCalibrationCurrent();
+            },900);
+            return;
+        }
+        if(calibrationMode&&calibrationIndex<calibrationApps.size()) {
+            String key=currentMessenger.toLowerCase(Locale.US);
+            QueueDb.put(this,"calib_"+key,"FAIL");
+            QueueDb.put(this,"reliability_gate_last","FAIL");
+        }
+        QueueDb.log(this,"RELIABILITY GATE FAILED: "+reason+"; no automatic messages started");
+        calibrationMode=false;
+        running=false;
+        paused=false;
+        waitingForNext=false;
+        QueueDb.put(this,"desired_running","0");
+        QueueDb.put(this,"desired_paused","0");
+        releaseQueueWakeLock();
+        performGlobalAction(GLOBAL_ACTION_BACK);
+    }
+
+    private void calibrationSuccessAll() {
+        calibrationMode=false;
+        imageMode=false;
+        rowIndex=-1;
+        phone="";
+        currentMessenger="";
+        targetName="";
+        targetPackage="";
+        QueueDb.put(this,"reliability_gate_last","PASS");
+        QueueDb.put(this,"reliability_gate_time",String.valueOf(System.currentTimeMillis()));
+        long now=System.currentTimeMillis();
+        for(String app:QueueDb.APPS) {
+            if(QueueDb.enabled(this,app)&&QueueDb.hasPending(this,app))QueueDb.due(this,app,now);
+        }
+        QueueDb.log(this,"RELIABILITY GATE PASS: all enabled messenger dry-runs passed; automatic queues released");
+        scheduleEarliest(700);
+    }
+
+    private String versionFingerprint(String pkg) {
+        try {
+            PackageInfo p=getPackageManager().getPackageInfo(pkg,0);
+            return String.valueOf(p.versionName)+":"+p.versionCode;
+        } catch(Exception e){return "unknown";}
     }
 
     private AccessibilityNodeInfo findGenericSend(AccessibilityNodeInfo root) {
