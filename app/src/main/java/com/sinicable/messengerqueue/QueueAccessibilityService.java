@@ -50,6 +50,7 @@ public class QueueAccessibilityService extends AccessibilityService {
             handler.postDelayed(()->{
                 synchronized(QueueAccessibilityService.this) {
                     if(running)return;
+                    QueueDb.recoverInterrupted(this);
                     if(QueueDb.next(this)<0) {
                         QueueDb.put(this,"desired_running","0");
                         QueueDb.put(this,"desired_paused","0");
