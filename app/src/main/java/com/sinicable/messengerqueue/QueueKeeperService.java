@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.provider.Settings;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -25,7 +26,10 @@ public class QueueKeeperService extends Service {
     static final String ACTION_TOGGLE="com.sinicable.messengerqueue.KEEPER_TOGGLE";
     static final String ACTION_STOP="com.sinicable.messengerqueue.KEEPER_STOP";
     private static final String CHANNEL="queue_keeper";
+    private static final String ALERT_CHANNEL="queue_keeper_alerts";
     private static final int NOTIFICATION_ID=2401;
+    private static final int ALERT_ID=2402;
+    private long accessibilityMissingSince=0;
     private ConnectivityManager connectivity;
     private ConnectivityManager.NetworkCallback networkCallback;
 
@@ -40,6 +44,14 @@ public class QueueKeeperService extends Service {
             refreshNotification();
             QueueAccessibilityService a=QueueAccessibilityService.INSTANCE;
             String state=a==null?"Accessibility reconnect pending":a.state();
+            if(a==null) {
+                if(accessibilityMissingSince<=0)accessibilityMissingSince=System.currentTimeMillis();
+                if(System.currentTimeMillis()-accessibilityMissingSince>=30000)postAccessibilityAlert();
+            } else {
+                accessibilityMissingSince=0;
+                NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+                if(nm!=null)nm.cancel(ALERT_ID);
+            }
             QueueDb.put(QueueKeeperService.this,"keeper_health",state);
             QueueDb.put(QueueKeeperService.this,"keeper_heartbeat",
                     String.valueOf(System.currentTimeMillis()));
@@ -101,8 +113,36 @@ public class QueueKeeperService extends Service {
             ch.setDescription("Keeps user-started automatic queues visible and resilient");
             ch.setShowBadge(false);
             NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
-            if(nm!=null)nm.createNotificationChannel(ch);
+            if(nm!=null){
+                nm.createNotificationChannel(ch);
+                NotificationChannel alert=new NotificationChannel(
+                        ALERT_CHANNEL,"Queue reliability alerts",NotificationManager.IMPORTANCE_HIGH);
+                alert.setDescription("Alerts when Accessibility automation is unavailable");
+                nm.createNotificationChannel(alert);
+            }
         }
+    }
+
+    private void postAccessibilityAlert(){
+        try {
+            Intent settings=new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            int flags=PendingIntent.FLAG_UPDATE_CURRENT;
+            if(Build.VERSION.SDK_INT>=23)flags|=PendingIntent.FLAG_IMMUTABLE;
+            PendingIntent open=PendingIntent.getActivity(this,41,settings,flags);
+            Notification.Builder b=Build.VERSION.SDK_INT>=26
+                    ?new Notification.Builder(this,ALERT_CHANNEL)
+                    :new Notification.Builder(this);
+            b.setSmallIcon(android.R.drawable.stat_notify_error)
+             .setContentTitle("Queue needs Accessibility")
+             .setContentText("Automatic queue is paused until Messenger Queue Skip Accessibility is enabled.")
+             .setStyle(new Notification.BigTextStyle().bigText(
+                     "Automatic queue is preserved, but Accessibility has been unavailable for 30 seconds. Tap to reopen Accessibility settings."))
+             .setAutoCancel(false)
+             .setContentIntent(open);
+            NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+            if(nm!=null)nm.notify(ALERT_ID,b.build());
+        } catch(Exception ignored){}
     }
 
     private PendingIntent serviceAction(String action,int request){
