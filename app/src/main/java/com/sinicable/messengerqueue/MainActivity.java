@@ -62,6 +62,7 @@ public class MainActivity extends Activity {
         access=label("",13,0xFFFFCE75,true);root.addView(access);
         addButton(root,"1  ENABLE ACCESSIBILITY",0xFF365FCE,()->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         reliability=label("",12,0xFFBFD1E6,false);root.addView(reliability);
+        addButton(root,"MAX POWER: BATTERY EXEMPTION",0xFF405F80,()->requestBatteryExemption());
         addButton(root,"RELIABILITY / BATTERY SETTINGS",0xFF405F80,()->{
             try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
             catch(Exception e){startActivity(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS));}
@@ -239,6 +240,11 @@ public class MainActivity extends Activity {
             try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}catch(Exception ignored){}
             return;
         }
+        if(!testOne&&!isBatteryExempt()){
+            toast("MAX POWER requires battery optimization exemption. Allow it, then press START again.");
+            requestBatteryExemption();
+            return;
+        }
         if(addContacts.isChecked()&&!ContactBridge.permission(this)){
             requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS,android.Manifest.permission.WRITE_CONTACTS},532);
             toast("Allow Contacts access and press START again");return;
@@ -401,6 +407,17 @@ public class MainActivity extends Activity {
             return p.versionName==null?"installed":("v"+p.versionName);
         } catch(Exception e){return "installed";}
     }
+    private void requestBatteryExemption(){
+        try {
+            Intent i=new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            i.setData(Uri.parse("package:"+getPackageName()));
+            startActivity(i);
+        } catch(Exception e) {
+            try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
+            catch(Exception ignored){}
+        }
+    }
+
     private boolean isBackgroundRestricted(){
         if(Build.VERSION.SDK_INT<28)return false;
         ActivityManager am=(ActivityManager)getSystemService(Context.ACTIVITY_SERVICE);
