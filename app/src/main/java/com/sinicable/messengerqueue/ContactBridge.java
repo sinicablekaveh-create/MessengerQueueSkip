@@ -32,19 +32,55 @@ final class ContactBridge {
         String name = alias(phone);
         if (name.isEmpty()) return "";
         String key = "contact_" + name;
-        if ("ok".equals(QueueDb.get(c, key, ""))) return name;
-        // Avoid importing twice when the app's preferences have been reset.
-        try (android.database.Cursor cur = c.getContentResolver().query(
-                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                new String[]{ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME},
-                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + "=?",
-                new String[]{name}, null)) {
-            if (cur != null && cur.moveToFirst()) {
-                QueueDb.put(c, key, "ok");
+        // Reuse an existing tagged contact, but also migrate it to include
+        // both local and E.164-style phone forms when older app versions
+        // created only one number.
+        try {
+            long rawId=-1L;
+            java.util.HashSet<String> existingNumbers=new java.util.HashSet<>();
+            try (android.database.Cursor cur = c.getContentResolver().query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    new String[]{
+                            ContactsContract.CommonDataKinds.Phone.RAW_CONTACT_ID,
+                            ContactsContract.CommonDataKinds.Phone.NUMBER
+                    },
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + "=?",
+                    new String[]{name}, null)) {
+                while (cur != null && cur.moveToNext()) {
+                    if(rawId<0) rawId=cur.getLong(0);
+                    String n=ContactImporter.phone(cur.getString(1));
+                    if(!n.isEmpty())existingNumbers.add(n);
+                    String intlExisting=ContactImporter.international(n);
+                    if(intlExisting!=null&&!intlExisting.isEmpty())existingNumbers.add(intlExisting.replace("+",""));
+                }
+            }
+            if(rawId>=0) {
+                String local=ContactImporter.phone(phone);
+                String intl=ContactImporter.international(local).replace("+","");
+                ArrayList<ContentProviderOperation> upgrade=new ArrayList<>();
+                if(!local.isEmpty()&&!existingNumbers.contains(local)) {
+                    upgrade.add(ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                            .withValue(ContactsContract.Data.RAW_CONTACT_ID,rawId)
+                            .withValue(ContactsContract.Data.MIMETYPE,CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+                            .withValue(CommonDataKinds.Phone.NUMBER,local)
+                            .withValue(CommonDataKinds.Phone.TYPE,CommonDataKinds.Phone.TYPE_MOBILE).build());
+                }
+                if(!intl.isEmpty()&&!existingNumbers.contains(intl)) {
+                    upgrade.add(ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                            .withValue(ContactsContract.Data.RAW_CONTACT_ID,rawId)
+                            .withValue(ContactsContract.Data.MIMETYPE,CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+                            .withValue(CommonDataKinds.Phone.NUMBER,"+"+intl)
+                            .withValue(CommonDataKinds.Phone.TYPE,CommonDataKinds.Phone.TYPE_MOBILE).build());
+                }
+                if(!upgrade.isEmpty()) {
+                    c.getContentResolver().applyBatch(ContactsContract.AUTHORITY,upgrade);
+                    QueueDb.log(c,"Upgraded existing "+name+" contact with missing phone format");
+                }
+                QueueDb.put(c,key,"ok");
                 return name;
             }
         } catch (Exception ex) {
-            QueueDb.log(c, "Contact lookup error: " + ex.getClass().getSimpleName());
+            QueueDb.log(c, "Contact lookup/migration error: " + ex.getClass().getSimpleName());
         }
         try {
             ArrayList<ContentProviderOperation> ops = new ArrayList<>();
