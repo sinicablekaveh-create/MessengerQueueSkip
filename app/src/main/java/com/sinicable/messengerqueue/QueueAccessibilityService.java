@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.content.ClipData;
 import android.content.Intent;
+import android.app.KeyguardManager;
 import android.graphics.Path;
 import android.graphics.Rect;
 import android.net.Uri;
@@ -11,6 +12,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.Build;
 import android.content.pm.PackageInfo;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -37,7 +39,7 @@ public class QueueAccessibilityService extends AccessibilityService {
     private long launchedAt=0,lastActionAt=0,sendActionAt=0,searchStartedAt=0,pausedAt=0;
     private long nextDueAt=0;
     private String currentMessenger="",phone="",targetName="",targetPackage="",message="",contactAlias="";
-    private String imageUri="";
+    private String imageUri="",imageMime="image/*";
     private boolean imageMode=false,triedAlias=false,newChatTapped=false,sendInProgress=false;
     private boolean waitingForNext=false,stepScheduled=false,awaitingResult=false,testOne=false;
     private volatile boolean diagnosticMode=false;
@@ -67,6 +69,7 @@ public class QueueAccessibilityService extends AccessibilityService {
                     }
                     message=QueueDb.get(this,"message","");
                     imageUri=QueueDb.get(this,"image_uri","");
+                    imageMime=QueueDb.get(this,"image_mime","image/*");
                     testOne=false;
                     running=true;
                     acquireQueueWakeLock();
@@ -77,8 +80,13 @@ public class QueueAccessibilityService extends AccessibilityService {
                         QueueDb.log(this,"Persistent PAUSE restored after service reconnect");
                     } else {
                         paused=false;
-                        QueueDb.log(this,"Persistent START restored after service reconnect");
-                        scheduleEarliest(1000);
+                        if(calibrationStillValid()) {
+                            QueueDb.log(this,"Persistent START restored with valid reliability fingerprint");
+                            scheduleEarliest(1000);
+                        } else {
+                            QueueDb.log(this,"Persistent START requires fresh reliability calibration");
+                            beginCalibration();
+                        }
                     }
                 }
             },1200);
@@ -115,6 +123,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         testOne="1".equals(QueueDb.get(this,"testOne","0"));
         message=QueueDb.get(this,"message","");
         imageUri=QueueDb.get(this,"image_uri","");
+        imageMime=QueueDb.get(this,"image_mime","image/*");
         QueueDb.put(this,"desired_running",testOne?"0":"1");
         QueueDb.put(this,"desired_paused","0");
         acquireQueueWakeLock();
@@ -150,7 +159,8 @@ public class QueueAccessibilityService extends AccessibilityService {
         QueueDb.put(this,"desired_paused",paused?"1":"0");
         QueueDb.log(this,paused?"All queues paused (persistent)":"All queues resumed");
         if(!paused) {
-            if(waitingForNext) scheduleEarliest(300);
+            if(!testOne && !calibrationStillValid()) beginCalibration();
+            else if(waitingForNext) scheduleEarliest(300);
             else schedule(300);
         }
     }
@@ -207,6 +217,19 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void scheduleEarliest(long minimumDelay) {
         if(!running||paused)return;
+        if(!screenReady()) {
+            waitingForNext=true;
+            generation++;
+            int screenToken=generation;
+            QueueDb.log(this,"Queue waiting: screen locked/off; state preserved");
+            handler.postDelayed(()->{
+                if(screenToken==generation&&running&&!paused){
+                    waitingForNext=false;
+                    scheduleEarliest(0);
+                }
+            },5000);
+            return;
+        }
         if(testOne && processed>=1) {
             running=false;
             waitingForNext=false;
@@ -311,7 +334,7 @@ public class QueueAccessibilityService extends AccessibilityService {
             grantUriPermission(targetPackage,image,Intent.FLAG_GRANT_READ_URI_PERMISSION);
             Intent share=new Intent(Intent.ACTION_SEND);
             share.setPackage(targetPackage);
-            share.setType("image/*");
+            share.setType(imageMime==null||imageMime.isEmpty()?"image/*":imageMime);
             share.putExtra(Intent.EXTRA_STREAM,image);
             share.setClipData(ClipData.newRawUri("image",image));
             share.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -556,6 +579,33 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
 
 
+    private boolean screenReady() {
+        try {
+            PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
+            KeyguardManager km=(KeyguardManager)getSystemService(KEYGUARD_SERVICE);
+            boolean interactive=pm==null||pm.isInteractive();
+            boolean locked=km!=null&&km.isKeyguardLocked();
+            return interactive&&!locked;
+        } catch(Exception e){return true;}
+    }
+
+    private boolean calibrationStillValid() {
+        try {
+            long t=Long.parseLong(QueueDb.get(this,"reliability_gate_time","0"));
+            if(!"PASS".equals(QueueDb.get(this,"reliability_gate_last","")))return false;
+            if(t<=0||System.currentTimeMillis()-t>12L*60L*60L*1000L)return false;
+            String imageFlag=(imageUri==null||imageUri.isEmpty())?"0":"1";
+            for(String app:QueueDb.APPS) {
+                if(!QueueDb.enabled(this,app)||!QueueDb.hasPending(this,app))continue;
+                String key=app.toLowerCase(Locale.US);
+                if(!"PASS".equals(QueueDb.get(this,"calib_"+key,"")))return false;
+                if(!versionFingerprint(packageFor(app)).equals(QueueDb.get(this,"calib_version_"+key,"")))return false;
+                if(!imageFlag.equals(QueueDb.get(this,"calib_image_"+key,"")))return false;
+            }
+            return true;
+        } catch(Exception e){return false;}
+    }
+
     private void acquireQueueWakeLock() {
         try {
             if(queueWakeLock!=null&&queueWakeLock.isHeld())return;
@@ -601,6 +651,14 @@ public class QueueAccessibilityService extends AccessibilityService {
 
     private void launchCalibrationCurrent() {
         if(!running||paused)return;
+        if(!screenReady()) {
+            QueueDb.log(this,"Reliability gate waiting for unlocked interactive screen");
+            int token=generation;
+            handler.postDelayed(()->{
+                if(token==generation&&running&&!paused&&calibrationMode)launchCalibrationCurrent();
+            },5000);
+            return;
+        }
         if(calibrationIndex>=calibrationApps.size()) {
             calibrationSuccessAll();
             return;
@@ -811,7 +869,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     private String versionFingerprint(String pkg) {
         try {
             PackageInfo p=getPackageManager().getPackageInfo(pkg,0);
-            return String.valueOf(p.versionName)+":"+p.versionCode;
+            long code=Build.VERSION.SDK_INT>=28?p.getLongVersionCode():p.versionCode;
+            return String.valueOf(p.versionName)+":"+code;
         } catch(Exception e){return "unknown";}
     }
 
