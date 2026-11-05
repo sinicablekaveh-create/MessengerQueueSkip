@@ -10,6 +10,7 @@ Native Android queue app for user-approved contacts in Bale, Eitaa and Rubika.
 - Uses Android Accessibility, enabled explicitly by the user, to control the installed messenger apps.
 - Saves stale in-flight sends as `UNKNOWN` after a process restart instead of blindly resending and risking duplicates.
 - Optional one-time UI Record/Test captures view selectors for messenger UI versions whose control IDs differ.
+- GitHub Actions compiles with Android SDK 36, AGP 9.5.0, Gradle 9.6.0 and Java 17, then verifies the APK signature and manifest.
 
 ## Target packages
 - Bale: `ir.nasim`
