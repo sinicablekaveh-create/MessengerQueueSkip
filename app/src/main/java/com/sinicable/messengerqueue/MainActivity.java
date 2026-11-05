@@ -126,7 +126,11 @@ public class MainActivity extends Activity {
             startActivityForResult(in,IMAGE_PICKER);
         });
         addButton(root,"REMOVE IMAGE",0xFF3E5067,()->{
-            imageUri="";QueueDb.put(this,"image_uri","");QueueDb.put(this,"image_name","");
+            imageUri="";
+            QueueDb.put(this,"image_uri","");
+            QueueDb.put(this,"image_name","");
+            QueueDb.put(this,"image_mime","image/*");
+            QueueDb.put(this,"reliability_gate_last","STALE");
             refreshImageLabel();
         });
         imageUri=QueueDb.get(this,"image_uri","");
@@ -240,6 +244,12 @@ public class MainActivity extends Activity {
             try {
                 java.io.InputStream in=getContentResolver().openInputStream(Uri.parse(imageUri));
                 if(in!=null)in.close();
+                String mime=QueueDb.get(this,"image_mime","image/*");
+                StringBuilder noShare=new StringBuilder();
+                if(baleEnabled.isChecked()&&!canShareImage(packageFor("Bale"),mime))noShare.append("Bale ");
+                if(rubikaEnabled.isChecked()&&!canShareImage(packageFor("Rubika"),mime))noShare.append("Rubika ");
+                if(eitaaEnabled.isChecked()&&!canShareImage(packageFor("Eitaa"),mime))noShare.append("Eitaa ");
+                if(noShare.length()>0){toast("Image share route unavailable: "+noShare.toString().trim());return;}
             } catch(Exception e){toast("Selected image is no longer readable. Select it again.");return;}
         }
 
@@ -301,8 +311,12 @@ public class MainActivity extends Activity {
                 getContentResolver().takePersistableUriPermission(uri,flags);
             } catch(Exception ignored){}
             imageUri=uri.toString();
+            String mime=getContentResolver().getType(uri);
+            if(mime==null||mime.trim().isEmpty())mime="image/*";
             QueueDb.put(this,"image_uri",imageUri);
+            QueueDb.put(this,"image_mime",mime);
             QueueDb.put(this,"image_name",displayName(uri,"Selected image"));
+            QueueDb.put(this,"reliability_gate_last","STALE");
             refreshImageLabel();
             toast("Image selected for all enabled queues");
             return;
@@ -363,6 +377,14 @@ public class MainActivity extends Activity {
             case "Eitaa":return "ir.eitaa.messenger";
             default:return "";
         }
+    }
+    private boolean canShareImage(String pkg,String mime){
+        try {
+            Intent i=new Intent(Intent.ACTION_SEND);
+            i.setPackage(pkg);
+            i.setType(mime==null||mime.isEmpty()?"image/*":mime);
+            return i.resolveActivity(getPackageManager())!=null;
+        } catch(Exception e){return false;}
     }
     private boolean isInstalled(String pkg){
         try {getPackageManager().getPackageInfo(pkg,0);return true;}catch(Exception e){return false;}
