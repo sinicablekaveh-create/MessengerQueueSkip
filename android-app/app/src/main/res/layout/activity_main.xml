@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="18dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="THREE IB"
+            android:textColor="@color/text"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Engine: STOPPED"
+            android:textColor="@color/muted"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/queueText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Queue: 0 pending"
+            android:textColor="@color/muted" />
+
+        <Button
+            android:id="@+id/importButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:backgroundTint="@color/blue"
+            android:text="1. IMPORT EXCEL CONTACTS"
+            android:textColor="@color/text" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Messengers"
+            android:textColor="@color/text"
+            android:textStyle="bold" />
+
+        <CheckBox
+            android:id="@+id/baleCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Bale / بله"
+            android:textColor="@color/text" />
+
+        <CheckBox
+            android:id="@+id/eitaaCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Eitaa / ایتا"
+            android:textColor="@color/text" />
+
+        <CheckBox
+            android:id="@+id/rubikaCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Rubika / روبیکا"
+            android:textColor="@color/text" />
+
+        <EditText
+            android:id="@+id/messageEdit"
+            android:layout_width="match_parent"
+            android:layout_height="110dp"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/blue"
+            android:gravity="top|start"
+            android:hint="Default message (Excel row message overrides this)"
+            android:inputType="textMultiLine"
+            android:padding="10dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/muted" />
+
+        <Button
+            android:id="@+id/imageButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Choose optional image" />
+
+        <TextView
+            android:id="@+id/imageText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Image: none"
+            android:textColor="@color/muted" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="Intervals in minutes (1–1440)"
+            android:textColor="@color/text"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/baleInterval"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Bale"
+                android:inputType="number"
+                android:textColor="@color/text"
+                android:textColorHint="@color/muted" />
+
+            <EditText
+                android:id="@+id/eitaaInterval"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Eitaa"
+                android:inputType="number"
+                android:textColor="@color/text"
+                android:textColorHint="@color/muted" />
+
+            <EditText
+                android:id="@+id/rubikaInterval"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Rubika"
+                android:inputType="number"
+                android:textColor="@color/text"
+                android:textColorHint="@color/muted" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/saveButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="SAVE MESSAGE / IMAGE / INTERVALS" />
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginTop="18dp"
+            android:backgroundTint="@color/green"
+            android:text="2. START AUTOMATIC QUEUE"
+            android:textColor="@color/text"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/stopButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="@color/red"
+            android:text="STOP AUTOMATIC"
+            android:textColor="@color/text" />
+
+        <Button
+            android:id="@+id/recordButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:backgroundTint="@color/amber"
+            android:text="3. RECORD / TEST MESSENGER UI"
+            android:textColor="@color/text" />
+
+        <Button
+            android:id="@+id/accessibilityButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ENABLE ACCESSIBILITY AUTOMATION" />
+
+        <Button
+            android:id="@+id/reliabilityButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ENABLE RELIABILITY SETTINGS" />
+
+        <Button
+            android:id="@+id/clearButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="5. CLEAR CURRENT QUEUE" />
+
+        <TextView
+            android:id="@+id/detailText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:paddingBottom="24dp"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+</ScrollView>
