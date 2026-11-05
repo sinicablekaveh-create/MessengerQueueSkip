@@ -159,7 +159,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         QueueDb.put(this,"desired_paused",paused?"1":"0");
         QueueDb.log(this,paused?"All queues paused (persistent)":"All queues resumed");
         if(!paused) {
-            if(!testOne && !calibrationStillValid()) beginCalibration();
+            if(waitingForNext && rowIndex<0 && !testOne && !calibrationStillValid()) beginCalibration();
             else if(waitingForNext) scheduleEarliest(300);
             else schedule(300);
         }
@@ -601,6 +601,8 @@ public class QueueAccessibilityService extends AccessibilityService {
                 if(!"PASS".equals(QueueDb.get(this,"calib_"+key,"")))return false;
                 if(!versionFingerprint(packageFor(app)).equals(QueueDb.get(this,"calib_version_"+key,"")))return false;
                 if(!imageFlag.equals(QueueDb.get(this,"calib_image_"+key,"")))return false;
+                if(!String.valueOf(imageUri).equals(QueueDb.get(this,"calib_image_uri_"+key,"")))return false;
+                if(!String.valueOf(imageMime).equals(QueueDb.get(this,"calib_image_mime_"+key,"")))return false;
             }
             return true;
         } catch(Exception e){return false;}
@@ -807,6 +809,8 @@ public class QueueAccessibilityService extends AccessibilityService {
         QueueDb.put(this,"calib_"+key,"PASS");
         QueueDb.put(this,"calib_version_"+key,versionFingerprint(targetPackage));
         QueueDb.put(this,"calib_image_"+key,(imageUri==null||imageUri.isEmpty())?"0":"1");
+        QueueDb.put(this,"calib_image_uri_"+key,String.valueOf(imageUri));
+        QueueDb.put(this,"calib_image_mime_"+key,String.valueOf(imageMime));
         QueueDb.put(this,"calib_time_"+key,String.valueOf(System.currentTimeMillis()));
         QueueDb.log(this,"RELIABILITY PASS "+currentMessenger+" ("+detail+")");
         imageMode=false;
