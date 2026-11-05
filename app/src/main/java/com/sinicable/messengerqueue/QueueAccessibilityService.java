@@ -62,13 +62,12 @@ public class QueueAccessibilityService extends AccessibilityService {
                         paused=true;
                         processed=0;
                         diagnosticMode=false;
-                        QueueDb.recoverInterrupted(this);
                         testOne=false;
                         message=QueueDb.get(this,"message","");
                         QueueDb.log(this,"Persistent PAUSE restored after service reconnect");
                     } else {
                         QueueDb.log(this,"Persistent START restored after service reconnect");
-                        startQueue();
+                        resumePersistentQueue();
                     }
                 }
             },1200);
@@ -100,8 +99,29 @@ public class QueueAccessibilityService extends AccessibilityService {
         message=QueueDb.get(this,"message","");
         QueueDb.put(this,"desired_running",testOne?"0":"1");
         QueueDb.put(this,"desired_paused","0");
+        QueueDb.put(this,"next_due_wall","0");
         QueueDb.log(this,testOne?"TEST ONE START":"START AUTOMATIC (persistent)");
         next(1000);
+    }
+
+    private synchronized void resumePersistentQueue() {
+        if(running)return;
+        running=true;
+        paused=false;
+        processed=0;
+        diagnosticMode=false;
+        QueueDb.recoverInterrupted(this);
+        testOne=false;
+        message=QueueDb.get(this,"message","");
+        long due=readDueWall();
+        long remaining=due>0 ? Math.max(1000L,due-System.currentTimeMillis()) : 1000L;
+        QueueDb.log(this,"Persistent queue resume in "+Math.max(1L,remaining/1000L)+"s");
+        next(remaining);
+    }
+
+    private long readDueWall() {
+        try {return Long.parseLong(QueueDb.get(this,"next_due_wall","0"));}
+        catch(Exception ignored) {return 0L;}
     }
     synchronized void togglePause() {
         if(!running) {startQueue();return;}
@@ -123,6 +143,10 @@ public class QueueAccessibilityService extends AccessibilityService {
             if(waitingForNext) {
                 long remaining=Math.max(0,nextDueAt-android.os.SystemClock.elapsedRealtime());
                 next(remaining);
+            } else if(rowIndex<0) {
+                long due=readDueWall();
+                long remaining=due>0 ? Math.max(1000L,due-System.currentTimeMillis()) : 1000L;
+                next(remaining);
             } else schedule(300);
         }
     }
@@ -132,6 +156,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         paused=false;
         QueueDb.put(this,"desired_running","0");
         QueueDb.put(this,"desired_paused","0");
+        QueueDb.put(this,"next_due_wall","0");
         generation++;
         if(scheduled!=null)handler.removeCallbacks(scheduled);
         if(wasRunning && rowIndex>=0 && !waitingForNext &&
@@ -157,22 +182,27 @@ public class QueueAccessibilityService extends AccessibilityService {
             waitingForNext=false;
             QueueDb.put(this,"desired_running","0");
             QueueDb.put(this,"desired_paused","0");
+            QueueDb.put(this,"next_due_wall","0");
             QueueDb.log(this,"TEST ONE FINISHED: check results before starting the full queue");
             return;
         }
         waitingForNext=true;
-        nextDueAt=android.os.SystemClock.elapsedRealtime()+Math.max(0,delay);
+        long safeDelay=Math.max(0,delay);
+        nextDueAt=android.os.SystemClock.elapsedRealtime()+safeDelay;
+        QueueDb.put(this,"next_due_wall",String.valueOf(System.currentTimeMillis()+safeDelay));
         generation++;
         if(scheduled!=null)handler.removeCallbacks(scheduled);
         int token=generation;
         scheduled=()->{
             if(token!=generation||!running||paused)return;
             waitingForNext=false;
+            QueueDb.put(this,"next_due_wall","0");
             rowIndex=QueueDb.next(this);
             if(rowIndex<0){
                 running=false;
                 QueueDb.put(this,"desired_running","0");
                 QueueDb.put(this,"desired_paused","0");
+                QueueDb.put(this,"next_due_wall","0");
                 QueueDb.log(this,"Queue complete");
                 return;
             }
@@ -415,6 +445,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         paused=false;
         QueueDb.put(this,"desired_running","0");
         QueueDb.put(this,"desired_paused","0");
+        QueueDb.put(this,"next_due_wall","0");
         generation++;
     }
     private synchronized void finishSubmitted(String detail) {
