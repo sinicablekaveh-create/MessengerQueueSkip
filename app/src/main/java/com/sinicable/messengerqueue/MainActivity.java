@@ -1,12 +1,18 @@
 package com.sinicable.messengerqueue;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.os.Bundle;
+import android.os.Build;
+import android.os.PowerManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.content.Intent;
+import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.view.View;
@@ -33,7 +39,7 @@ public class MainActivity extends Activity {
     private EditText message, delay;
     private Spinner primary, fallback;
     private CheckBox approved, addContacts;
-    private TextView status, logs, access;
+    private TextView status, logs, access, reliability;
     private final Runnable ticker=new Runnable() {
         @Override public void run() {
             refresh();
@@ -58,6 +64,11 @@ public class MainActivity extends Activity {
         access=label("",13,0xFFFFCE75,true);root.addView(access);
         addButton(root,"1  ENABLE ACCESSIBILITY",0xFF365FCE,()-> {
             startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+        });
+        reliability=label("",12,0xFFBFD1E6,false);root.addView(reliability);
+        addButton(root,"RELIABILITY / BATTERY SETTINGS",0xFF405F80,()-> {
+            try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
+            catch(Exception e) {startActivity(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS));}
         });
 
         space(root,12);
@@ -157,6 +168,17 @@ public class MainActivity extends Activity {
     }
     private void start(boolean testOne) {
         if(!approved.isChecked()) {toast("Confirm recipients' consent first");return;}
+        String selected=NAMES[primary.getSelectedItemPosition()];
+        if(!isInstalled(packageFor(selected))) {
+            toast(selected+" is not installed. Preflight stopped.");
+            return;
+        }
+        if(isBackgroundRestricted()) {
+            toast("Android has this app in Restricted background mode. Remove restriction before START.");
+            try {startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}
+            catch(Exception ignored) {}
+            return;
+        }
         if(QueueDb.next(this)<0) {toast("Import contacts with pending status first");return;}
         if(message.getText().toString().trim().isEmpty()){toast("Enter the message text");return;}
         int d;
@@ -181,6 +203,9 @@ public class MainActivity extends Activity {
         QueueDb.put(this,"primary",NAMES[primary.getSelectedItemPosition()]);
         QueueDb.put(this,"fallback",FALLBACK[fallback.getSelectedItemPosition()]);
         QueueDb.put(this,"testOne",testOne?"1":"0");
+        QueueDb.log(this,"PREFLIGHT OK: "+selected+" "+versionOf(packageFor(selected))+
+                ", backgroundRestricted="+isBackgroundRestricted()+
+                ", batteryExempt="+isBatteryExempt());
         s.startQueue();
         toast(testOne?"Single-contact test started":"Automatic queue started");refresh();
     }
@@ -213,8 +238,44 @@ public class MainActivity extends Activity {
         access.setTextColor(ready?0xFF57E6AC:0xFFFFC27E);
         String mode=ready?QueueAccessibilityService.INSTANCE.state():"OFF";
         status.setText(QueueDb.summary(this)+"\nEngine: "+mode);
+        String selected=primary==null?"Bale":NAMES[primary.getSelectedItemPosition()];
+        String pkg=packageFor(selected);
+        reliability.setText("Preflight: "+selected+" "+versionOf(pkg)+
+                " | installed="+isInstalled(pkg)+
+                " | Android Restricted="+isBackgroundRestricted()+
+                " | battery exemption="+isBatteryExempt()+
+                "\nSamsung: add Messenger Queue Skip to Never sleeping apps for maximum reliability.");
         String log=QueueDb.get(this,"logs","No events yet.");
         if(!log.equals(logs.getText().toString()))logs.setText(log);
+    }
+    private static String packageFor(String app) {
+        switch(app) {
+            case "Bale": return "ir.nasim";
+            case "Rubika": return "app.rbmain.a";
+            case "Eitaa": return "ir.eitaa.messenger";
+            default: return "";
+        }
+    }
+    private boolean isInstalled(String pkg) {
+        if(pkg==null||pkg.isEmpty())return false;
+        try {getPackageManager().getPackageInfo(pkg,0);return true;}
+        catch(Exception e){return false;}
+    }
+    private String versionOf(String pkg) {
+        if(!isInstalled(pkg))return "NOT INSTALLED";
+        try {
+            PackageInfo p=getPackageManager().getPackageInfo(pkg,0);
+            return p.versionName==null?"installed":("v"+p.versionName);
+        } catch(Exception e){return "installed";}
+    }
+    private boolean isBackgroundRestricted() {
+        if(Build.VERSION.SDK_INT<28)return false;
+        ActivityManager am=(ActivityManager)getSystemService(Context.ACTIVITY_SERVICE);
+        return am!=null && am.isBackgroundRestricted();
+    }
+    private boolean isBatteryExempt() {
+        PowerManager pm=(PowerManager)getSystemService(Context.POWER_SERVICE);
+        return pm!=null && pm.isIgnoringBatteryOptimizations(getPackageName());
     }
     @Override protected void onResume(){super.onResume();handler.post(ticker);}
     @Override protected void onPause(){handler.removeCallbacks(ticker);super.onPause();}
