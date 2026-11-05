@@ -918,6 +918,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
 
     private AccessibilityNodeInfo findGenericSend(AccessibilityNodeInfo root) {
+        AccessibilityNodeInfo learned=findLearnedSelector(root,"image_send",false,true);
+        if(learned!=null)return learned;
         List<AccessibilityNodeInfo> nodes=new ArrayList<>();
         collect(root,nodes,0,40);
         int h=getResources().getDisplayMetrics().heightPixels;
@@ -940,6 +942,7 @@ public class QueueAccessibilityService extends AccessibilityService {
             AccessibilityNodeInfo action=clickable(n);
             if(action!=null&&r.centerY()>bestY){best=action;bestY=r.centerY();}
         }
+        if(best!=null)rememberSelector("image_send",best);
         return best;
     }
 
@@ -1030,6 +1033,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
 
     private AccessibilityNodeInfo findSearchEditor(AccessibilityNodeInfo root) {
+        AccessibilityNodeInfo learned=findLearnedSelector(root,"search_editor",true,false);
+        if(learned!=null)return learned;
         List<AccessibilityNodeInfo> nodes=new ArrayList<>();
         collect(root,nodes,0,40);
         AccessibilityNodeInfo best=null;
@@ -1047,6 +1052,7 @@ public class QueueAccessibilityService extends AccessibilityService {
                 if(r.top<minTop){best=n;minTop=r.top;}
             }
         }
+        if(best!=null)rememberSelector("search_editor",best);
         return best;
     }
 
@@ -1081,6 +1087,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
 
     private AccessibilityNodeInfo findChatComposer(AccessibilityNodeInfo root) {
+        AccessibilityNodeInfo learned=findLearnedSelector(root,"composer",true,false);
+        if(learned!=null)return learned;
         List<AccessibilityNodeInfo> nodes=new ArrayList<>();
         collect(root,nodes,0,40);
         int screenHeight=getResources().getDisplayMetrics().heightPixels;
@@ -1095,11 +1103,18 @@ public class QueueAccessibilityService extends AccessibilityService {
             if(r.isEmpty() || r.centerY()<screenHeight*0.35)continue;
             if(r.centerY()>maxY) {best=n;maxY=r.centerY();}
         }
+        if(best!=null)rememberSelector("composer",best);
         return best;
     }
 
     private AccessibilityNodeInfo findSendNearComposer(AccessibilityNodeInfo root,
             AccessibilityNodeInfo composer) {
+        AccessibilityNodeInfo learned=findLearnedSelector(root,"text_send",false,true);
+        if(learned!=null) {
+            Rect lr=new Rect();learned.getBoundsInScreen(lr);
+            Rect er=new Rect();composer.getBoundsInScreen(er);
+            if(!lr.isEmpty()&&!er.isEmpty()&&Math.abs(lr.centerY()-er.centerY())<=250)return learned;
+        }
         Rect editor=new Rect();composer.getBoundsInScreen(editor);
         List<AccessibilityNodeInfo> nodes=new ArrayList<>();
         collect(root,nodes,0,40);
@@ -1127,8 +1142,47 @@ public class QueueAccessibilityService extends AccessibilityService {
                     Math.abs((long)r.centerX()-editor.right)/3;
             if(distance<bestDistance){best=action;bestDistance=distance;}
         }
+        if(best!=null)rememberSelector("text_send",best);
         return best;
     }
+
+    private AccessibilityNodeInfo findLearnedSelector(AccessibilityNodeInfo root,String role,
+            boolean mustEditable,boolean mustClickable) {
+        if(root==null||currentMessenger==null||currentMessenger.isEmpty())return null;
+        String app=currentMessenger.toLowerCase(Locale.US);
+        String version=versionFingerprint(packageFor(currentMessenger));
+        if(!version.equals(QueueDb.get(this,"selector_version_"+app+"_"+role,"")))return null;
+        String id=QueueDb.get(this,"selector_id_"+app+"_"+role,"");
+        if(id.isEmpty())return null;
+        try {
+            List<AccessibilityNodeInfo> nodes=root.findAccessibilityNodeInfosByViewId(id);
+            if(nodes==null)return null;
+            for(AccessibilityNodeInfo n:nodes) {
+                if(n==null||!n.isVisibleToUser()||!n.isEnabled())continue;
+                if(mustEditable&&!n.isEditable())continue;
+                AccessibilityNodeInfo candidate=mustClickable?clickable(n):n;
+                if(candidate!=null) {
+                    QueueDb.put(this,"selector_last_hit_"+app+"_"+role,
+                            String.valueOf(System.currentTimeMillis()));
+                    return candidate;
+                }
+            }
+        } catch(Exception ignored) {}
+        return null;
+    }
+
+    private void rememberSelector(String role,AccessibilityNodeInfo node) {
+        if(node==null||currentMessenger==null||currentMessenger.isEmpty())return;
+        String id=strRaw(node.getViewIdResourceName());
+        if(id.isEmpty())return;
+        String app=currentMessenger.toLowerCase(Locale.US);
+        QueueDb.put(this,"selector_id_"+app+"_"+role,id);
+        QueueDb.put(this,"selector_class_"+app+"_"+role,strRaw(node.getClassName()));
+        QueueDb.put(this,"selector_version_"+app+"_"+role,
+                versionFingerprint(packageFor(currentMessenger)));
+    }
+
+    private static String strRaw(CharSequence c){return c==null?"":c.toString();}
     private static String str(CharSequence c){return c==null?"":c.toString().toLowerCase(Locale.ROOT);}
     private AccessibilityNodeInfo findEditable(AccessibilityNodeInfo parent,boolean searchOnly) {
         List<AccessibilityNodeInfo> found=new ArrayList<>();
