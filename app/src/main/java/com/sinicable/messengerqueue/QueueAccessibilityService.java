@@ -44,6 +44,34 @@ public class QueueAccessibilityService extends AccessibilityService {
         super.onServiceConnected();
         INSTANCE=this;
         QueueDb.log(this,"Accessibility engine connected");
+        final boolean wantsRun="1".equals(QueueDb.get(this,"desired_running","0"));
+        final boolean wantsPause="1".equals(QueueDb.get(this,"desired_paused","0"));
+        if(wantsRun) {
+            handler.postDelayed(()->{
+                synchronized(QueueAccessibilityService.this) {
+                    if(running)return;
+                    if(QueueDb.next(this)<0) {
+                        QueueDb.put(this,"desired_running","0");
+                        QueueDb.put(this,"desired_paused","0");
+                        QueueDb.log(this,"Persistent START cleared: no pending contacts");
+                        return;
+                    }
+                    if(wantsPause) {
+                        running=true;
+                        paused=true;
+                        processed=0;
+                        diagnosticMode=false;
+                        QueueDb.recoverInterrupted(this);
+                        testOne=false;
+                        message=QueueDb.get(this,"message","");
+                        QueueDb.log(this,"Persistent PAUSE restored after service reconnect");
+                    } else {
+                        QueueDb.log(this,"Persistent START restored after service reconnect");
+                        startQueue();
+                    }
+                }
+            },1200);
+        }
     }
     @Override public void onDestroy() {
         running=false;
@@ -69,7 +97,9 @@ public class QueueAccessibilityService extends AccessibilityService {
         QueueDb.recoverInterrupted(this);
         testOne="1".equals(QueueDb.get(this,"testOne","0"));
         message=QueueDb.get(this,"message","");
-        QueueDb.log(this,"START AUTOMATIC");
+        QueueDb.put(this,"desired_running",testOne?"0":"1");
+        QueueDb.put(this,"desired_paused","0");
+        QueueDb.log(this,testOne?"TEST ONE START":"START AUTOMATIC (persistent)");
         next(1000);
     }
     synchronized void togglePause() {
@@ -86,7 +116,8 @@ public class QueueAccessibilityService extends AccessibilityService {
             nextDueAt+=duration;
             pausedAt=0;
         }
-        QueueDb.log(this,paused?"Queue paused":"Queue resumed");
+        QueueDb.put(this,"desired_paused",paused?"1":"0");
+        QueueDb.log(this,paused?"Queue paused (persistent)":"Queue resumed");
         if(!paused) {
             if(waitingForNext) {
                 long remaining=Math.max(0,nextDueAt-android.os.SystemClock.elapsedRealtime());
@@ -98,6 +129,8 @@ public class QueueAccessibilityService extends AccessibilityService {
         boolean wasRunning=running;
         running=false;
         paused=false;
+        QueueDb.put(this,"desired_running","0");
+        QueueDb.put(this,"desired_paused","0");
         generation++;
         if(scheduled!=null)handler.removeCallbacks(scheduled);
         if(wasRunning && rowIndex>=0 && !waitingForNext &&
@@ -121,6 +154,8 @@ public class QueueAccessibilityService extends AccessibilityService {
         if(testOne && processed>=1) {
             running=false;
             waitingForNext=false;
+            QueueDb.put(this,"desired_running","0");
+            QueueDb.put(this,"desired_paused","0");
             QueueDb.log(this,"TEST ONE FINISHED: check results before starting the full queue");
             return;
         }
@@ -133,7 +168,13 @@ public class QueueAccessibilityService extends AccessibilityService {
             if(token!=generation||!running||paused)return;
             waitingForNext=false;
             rowIndex=QueueDb.next(this);
-            if(rowIndex<0){running=false;QueueDb.log(this,"Queue complete");return;}
+            if(rowIndex<0){
+                running=false;
+                QueueDb.put(this,"desired_running","0");
+                QueueDb.put(this,"desired_paused","0");
+                QueueDb.log(this,"Queue complete");
+                return;
+            }
             phone=QueueDb.phone(this,rowIndex);
             QueueDb.status(this,rowIndex,"in_flight"); // durable crash-safe reservation
             attempt=0;
@@ -371,6 +412,8 @@ public class QueueAccessibilityService extends AccessibilityService {
         awaitingResult=false;
         running=false;
         paused=false;
+        QueueDb.put(this,"desired_running","0");
+        QueueDb.put(this,"desired_paused","0");
         generation++;
     }
     private synchronized void finishSubmitted(String detail) {
