@@ -172,12 +172,13 @@ public class MainActivity extends Activity {
         addButton(root,"▶  START AUTOMATIC",0xFF00A768,()->start(false));
         addButton(root,"▶  TEST ONE QUEUE TASK",0xFF285C96,()->start(true));
         addButton(root,"Ⅱ  PAUSE / RESUME ALL",0xFFF1B950,()->{
+            boolean messengerOn=baleEnabled.isChecked()||rubikaEnabled.isChecked()||eitaaEnabled.isChecked();
             QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
-            if(s!=null)s.togglePause();
+            if(messengerOn&&s!=null)s.togglePause();
             else {
                 boolean paused="1".equals(QueueDb.get(this,"desired_paused","0"));
                 QueueDb.put(this,"desired_paused",paused?"0":"1");
-                QueueDb.log(this,paused?"SMS queue resumed":"SMS queue paused");
+                QueueDb.log(this,paused?"Queue resumed":"Queue paused");
             }
             refresh();
         });
@@ -247,6 +248,8 @@ public class MainActivity extends Activity {
         if(!messengerOn&&!smsOn){toast("Enable at least one queue");return;}
         if(testOne&&smsOn){toast("TEST ONE currently covers messenger UI queues only. Disable SMS for this test.");return;}
         if(QueueDb.items(this).length()==0){toast("Import a headered phone,opt_in Excel/CSV first");return;}
+        if(QueueDb.optedInCount(this)==0){toast("No imported row has opt_in=true");return;}
+        if(smsOn&&QueueDb.smsEligibleCount(this)==0){toast("SMS has no eligible row with opt_in=true and send_sms=true");return;}
         if(smsOn&&QueueDb.get(this,"sms_subscription_id","").isEmpty()){toast("Select the SMS SIM first");return;}
 
         int bd=parseDelay(baleDelay),rd=parseDelay(rubikaDelay),ed=parseDelay(eitaaDelay),sd=parseDelay(smsDelay);
@@ -672,9 +675,10 @@ public class MainActivity extends Activity {
         }
         if(requestCode==534) {
             if(!granted) {
+                boolean wasStarting="1".equals(QueueDb.get(this,"pending_auto_start","0"));
                 QueueDb.put(this,"pending_auto_start","0");
                 QueueDb.put(this,"pending_test_one","0");
-                toast("SMS permissions denied. SMS START cancelled; messenger queues remain available.");
+                toast(wasStarting?"SMS permissions denied. SMS START cancelled; messenger queues remain available.":"Phone-state permission denied; SIM selection cancelled.");
                 return;
             }
             if(!"1".equals(QueueDb.get(this,"pending_auto_start","0")))chooseSmsSim();
