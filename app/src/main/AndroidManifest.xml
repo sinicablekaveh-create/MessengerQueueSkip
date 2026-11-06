@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
     <queries>
         <package android:name="ir.nasim"/>
         <package android:name="app.rbmain.a"/>
@@ -20,10 +21,15 @@
         <package android:name="com.whatsapp"/>
     </queries>
     <application
+        android:extractNativeLibs="true"
         android:allowBackup="false"
         android:label="THREE IB"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
+        <activity android:name=".TelegramActivity" android:exported="false"/>
+        <service android:name=".TelegramQueueService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started Telegram personal-account queue with visible controls"/>
+        </service>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
