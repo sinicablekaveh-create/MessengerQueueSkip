@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   android:
@@ -116,23 +116,21 @@ jobs:
             sha256sum "$APK"
           } > "$INFO"
           git archive --format=zip --prefix="THREE-IB-v${VERSION_NAME}-${BUILD_DATE}/" HEAD -o "$SOURCE_ZIP"
-          zip -q "$SOURCE_ZIP" "$INFO"
+          zip -q -j "$SOURCE_ZIP" "$INFO"
           sha256sum "$APK" "$SOURCE_ZIP" > SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+      - name: Publish dated GitHub Release assets
+        uses: softprops/action-gh-release@v2
         with:
-          name: THREE-IB-LATEST-${{ env.BUILD_DATE }}-v${{ env.VERSION_NAME }}-APK
-          path: app/build/outputs/apk/debug/${{ env.APK_NAME }}
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@v4
-        with:
-          name: THREE-IB-SOURCE-LATEST-${{ env.BUILD_DATE }}-v${{ env.VERSION_NAME }}-ZIP
-          path: ${{ runner.temp }}/${{ env.SOURCE_ZIP_NAME }}
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@v4
-        with:
-          name: THREE-IB-SHA256-${{ env.BUILD_DATE }}-v${{ env.VERSION_NAME }}
-          path: SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 30
+          tag_name: THREE-IB-v2.9.1-2026-11-06
+          name: THREE IB v2.9.1 | 2026-11-06
+          target_commitish: ${{ github.event.pull_request.head.sha || github.sha }}
+          body_path: ${{ runner.temp }}/BUILD_INFO.txt
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: |
+            app/build/outputs/apk/debug/${{ env.APK_NAME }}
+            ${{ runner.temp }}/${{ env.SOURCE_ZIP_NAME }}
+            SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
