@@ -134,3 +134,15 @@ jobs:
             SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload dated build bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: THREE-IB-LATEST-${{ env.BUILD_DATE }}-v${{ env.VERSION_NAME }}-BUNDLE
+          path: |
+            app/build/outputs/apk/debug/${{ env.APK_NAME }}
+            ${{ runner.temp }}/${{ env.SOURCE_ZIP_NAME }}
+            SHA256SUMS.txt
+            ${{ runner.temp }}/BUILD_INFO.txt
+          if-no-files-found: error
+          retention-days: 30
