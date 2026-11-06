@@ -55,6 +55,10 @@ final class QueueDb {
                     o.put("sms",allowed&&o.optBoolean("send_sms",false)?"pending":"blocked");
                     changed=true;
                 }
+                if(!o.has("whatsapp")) {
+                    o.put("whatsapp",allowed?"pending":"blocked");
+                    changed=true;
+                }
             }
             if(changed)save(c,a);
             return a;
@@ -63,8 +67,8 @@ final class QueueDb {
         }
     }
 
-    private static void save(Context c,JSONArray arr) {
-        prefs(c).edit().putString("items",arr.toString()).commit();
+    private static boolean save(Context c,JSONArray arr) {
+        return prefs(c).edit().putString("items",arr.toString()).commit();
     }
 
     static synchronized int append(Context c,RecipientImportParser.Result parsed) {
@@ -88,6 +92,7 @@ final class QueueDb {
                 v.put("status",r.optIn?"pending":"blocked");
                 for(String app:APPS)v.put(key(app),r.optIn?"pending":"blocked");
                 v.put("sms",r.optIn&&r.sendSms?"pending":"blocked");
+                v.put("whatsapp",r.optIn?"pending":"blocked");
                 v.put("sms_total_parts",0);
                 v.put("sms_sent_parts",0);
                 v.put("sms_delivered_parts",0);
@@ -118,6 +123,9 @@ final class QueueDb {
             }
             if("in_flight".equals(v.optString("sms"))) {
                 try {v.put("sms","review");count++;} catch(Exception ignored){}
+            }
+            if("in_flight".equals(v.optString("whatsapp"))) {
+                try {v.put("whatsapp","review");count++;} catch(Exception ignored){}
             }
         }
         if(count>0) {
@@ -182,6 +190,58 @@ final class QueueDb {
         int d=3;
         try {d=Integer.parseInt(get(c,"delay_"+key(app),"3"));} catch(Exception ignored){}
         return Math.max(1,Math.min(1440,d));
+    }
+
+    /** Recover only WhatsApp attempts without touching active queues for other channels. */
+    static synchronized int whatsappRecoverInterrupted(Context c) {
+        JSONArray a=items(c); int recovered=0;
+        for(int i=0;i<a.length();i++) {
+            JSONObject row=a.optJSONObject(i);
+            if(row!=null&&"in_flight".equals(row.optString("whatsapp",""))) {
+                try {row.put("whatsapp","review"); recovered++;}
+                catch(Exception ignored){}
+            }
+        }
+        if(recovered>0) {
+            save(c,a);
+            log(c,"Recovered "+recovered+" WhatsApp attempt(s) as REVIEW; no automatic retry");
+        }
+        return recovered;
+    }
+
+    /** Commit IN_FLIGHT before an outbound HTTP attempt. */
+    static synchronized boolean whatsappMarkInFlight(Context c,int index) {
+        JSONArray a=items(c);
+        JSONObject row=a.optJSONObject(index);
+        if(row==null||!row.optBoolean("opt_in",false)
+                ||!"pending".equals(row.optString("whatsapp","")))return false;
+        try {row.put("whatsapp","in_flight");}
+        catch(Exception e){return false;}
+        return save(c,a);
+    }
+
+    /** Remove only pending WhatsApp work, preserving sent/review records and shared rows. */
+    static synchronized void whatsappClear(Context c) {
+        JSONArray a=items(c);
+        for(int i=0;i<a.length();i++) {
+            JSONObject row=a.optJSONObject(i);
+            if(row==null)continue;
+            String state=row.optString("whatsapp","");
+            if("pending".equals(state)||"in_flight".equals(state)) {
+                try {row.put("whatsapp","in_flight".equals(state)?"review":"cleared");}
+                catch(Exception ignored){}
+            }
+        }
+        save(c,a);
+    }
+
+    static synchronized int whatsappCount(Context c,String status) {
+        JSONArray a=items(c); int n=0;
+        for(int i=0;i<a.length();i++) {
+            JSONObject row=a.optJSONObject(i);
+            if(row!=null&&status.equals(row.optString("whatsapp","")))n++;
+        }
+        return n;
     }
 
     static synchronized boolean smsEnabled(Context c) {
