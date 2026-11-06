@@ -1,62 +1,62 @@
-name: Build THREE IB APK
-
+name: Build THREE IB baseline APK (3 messengers)
 on:
   push:
-    branches: [ "three-ib-apk-v1" ]
+    branches: [three-ib-ci-baseline-20261106]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  android:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Java 17
-        uses: actions/setup-java@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Install Android platform and build tools
+      - name: Install Android SDK packages
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-
-      - name: Gradle 9.6
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.6.0'
-
-      - name: Build installable debug APK
-        working-directory: android-app
-        run: gradle :app:assembleDebug --stacktrace --no-daemon
-
-      - name: Verify APK signature and manifest
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Compile, package and sign APK with SDK tools
+        shell: bash
         run: |
-          APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | head -20
-          mkdir -p dist
-          cp "$APK" dist/THREE_IB_v1.0.apk
-          sha256sum dist/THREE_IB_v1.0.apk | tee dist/SHA256.txt
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          set -euo pipefail
+          ROOT="$PWD"
+          SDK="/usr/local/lib/android/sdk"
+          TOOLS="$SDK/build-tools/35.0.0"
+          ANDROID_JAR="$SDK/platforms/android-35/android.jar"
+          OUT="$RUNNER_TEMP/mqs"
+          mkdir -p "$OUT/classes" "$OUT/dex" "$ROOT/app/build/outputs/apk/debug"
+          python3 - "$OUT/AndroidManifest.xml" <<'PY'
+          import pathlib,sys
+          text=pathlib.Path("app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+          text=text.replace('<manifest xmlns:android=', '<manifest package="com.sinicable.messengerqueue" android:versionCode="14" android:versionName="2.7.0" xmlns:android=',1)
+          pathlib.Path(sys.argv[1]).write_text(text,encoding="utf-8")
+          PY
+          "$TOOLS/aapt2" compile --dir app/src/main/res -o "$OUT/resources.zip"
+          "$TOOLS/aapt2" link -o "$OUT/unsigned.apk" --manifest "$OUT/AndroidManifest.xml" -I "$ANDROID_JAR" --min-sdk-version 26 --target-sdk-version 35 "$OUT/resources.zip"
+          find app/src/main/java -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 -source 17 -target 17 -cp "$ANDROID_JAR" -d "$OUT/classes"
+          find "$OUT/classes" -name '*.class' -print0 | xargs -0 "$TOOLS/d8" --lib "$ANDROID_JAR" --min-api 26 --output "$OUT/dex"
+          python3 - "$OUT/unsigned.apk" "$OUT/dex/classes.dex" <<'PY'
+          import zipfile,sys
+          with zipfile.ZipFile(sys.argv[1],"a") as z:
+              z.write(sys.argv[2],"classes.dex")
+          PY
+          "$TOOLS/zipalign" -f -p 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
+          keytool -genkeypair -keystore "$OUT/debug.keystore" -alias androiddebugkey -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 3650 -noprompt
+          "$TOOLS/apksigner" sign --ks "$OUT/debug.keystore" --ks-pass pass:android --key-pass pass:android --out "$ROOT/app/build/outputs/apk/debug/THREE_IB_BASELINE_v2.7.0.apk" "$OUT/aligned.apk"
+          "$TOOLS/apksigner" verify --verbose "$ROOT/app/build/outputs/apk/debug/THREE_IB_BASELINE_v2.7.0.apk"
+      - uses: actions/upload-artifact@v4
         with:
-          name: THREE_IB_APK
-          path: |
-            dist/THREE_IB_v1.0.apk
-            dist/SHA256.txt
+          name: THREE_IB_BASELINE_v2.7.0-APK
+          path: app/build/outputs/apk/debug/THREE_IB_BASELINE_v2.7.0.apk
           if-no-files-found: error
-          retention-days: 30
