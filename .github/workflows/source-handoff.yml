@@ -1,8 +1,11 @@
 name: Export THREE IB source ZIP
 on:
   push:
+    branches: [main]
     paths:
       - .github/workflows/source-handoff.yml
+      - AGENTS.md
+      - 'docs/**'
   workflow_dispatch:
 
 permissions:
