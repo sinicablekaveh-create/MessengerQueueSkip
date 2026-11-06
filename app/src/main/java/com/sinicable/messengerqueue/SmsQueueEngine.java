@@ -7,7 +7,10 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.telephony.SmsManager;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
 import java.util.ArrayList;
+import java.util.List;
 
 /** Independent, consent-gated SMS queue. It never reads incoming SMS. */
 final class SmsQueueEngine {
@@ -27,6 +30,10 @@ final class SmsQueueEngine {
         int subId;
         try {subId=Integer.parseInt(QueueDb.get(c,"sms_subscription_id",""));}
         catch(Exception e){QueueDb.log(c,"SMS waiting: choose a SIM subscription");return;}
+        if(!activeSubscription(c,subId)) {
+            QueueDb.log(c,"SMS waiting: selected SIM subscription is no longer active");
+            return;
+        }
 
         String phone=QueueDb.smsPhoneById(c,rowId);
         String text=QueueDb.smsMessageById(c,rowId);
@@ -71,5 +78,15 @@ final class SmsQueueEngine {
             QueueDb.smsTerminal(c,rowId,"review","SMS dispatch threw after IN_FLIGHT; duplicate retry blocked");
             QueueDb.log(c,"SMS dispatch uncertain: "+e.getClass().getSimpleName());
         }
+    }
+
+    private static boolean activeSubscription(Context c,int subId) {
+        try {
+            SubscriptionManager sm=(SubscriptionManager)c.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
+            List<SubscriptionInfo> list=sm==null?null:sm.getActiveSubscriptionInfoList();
+            if(list==null)return false;
+            for(SubscriptionInfo info:list)if(info!=null&&info.getSubscriptionId()==subId)return true;
+        } catch(SecurityException ignored){}
+        return false;
     }
 }
