@@ -40,6 +40,8 @@ jobs:
               env.write(f"VERSION_CODE={version_code.group(1)}\n")
               env.write(f"VERSION_NAME={version_name.group(1)}\n")
           PY
+      - name: Test recipient consent parser
+        run: bash tools/test-recipient-import.sh
       - name: Install Android SDK packages
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
