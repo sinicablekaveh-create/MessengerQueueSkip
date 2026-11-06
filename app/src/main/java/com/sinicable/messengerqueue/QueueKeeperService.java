@@ -41,6 +41,8 @@ public class QueueKeeperService extends Service {
                 stopSelf();
                 return;
             }
+            QueueDb.smsRecoverStale(QueueKeeperService.this);
+            SmsQueueEngine.tick(QueueKeeperService.this);
             refreshNotification();
             QueueAccessibilityService a=QueueAccessibilityService.INSTANCE;
             String state=a==null?"Accessibility reconnect pending":a.state();
@@ -69,11 +71,14 @@ public class QueueKeeperService extends Service {
     }
 
     public static void stop(Context c) {
+        QueueDb.put(c,"desired_running","0");
+        QueueDb.put(c,"desired_paused","0");
         try {c.stopService(new Intent(c,QueueKeeperService.class));} catch(Exception ignored){}
     }
 
     @Override public void onCreate(){
         super.onCreate();
+        QueueDb.recoverInterrupted(this);
         ensureChannel();
         registerNetworkMonitor();
     }
