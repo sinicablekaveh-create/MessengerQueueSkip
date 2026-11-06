@@ -3,7 +3,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -69,7 +68,6 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | head -20
       - name: Create dated source archive, report and checksums
-        if: github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
@@ -84,9 +82,10 @@ jobs:
             echo "Build timestamp UTC: $BUILD_TIMESTAMP"
             echo "Commit: $GITHUB_SHA"
             echo "Package: com.sinicable.messengerqueue"
-            echo "Implemented: Bale, Rubika, Eitaa, SMS SIM, Telegram TDLib"
+            echo "Code included: Bale, Rubika, Eitaa, SMS SIM, Telegram TDLib, WhatsApp Business Cloud API adapter"
             echo "Telegram setup: API ID/API HASH entered in-app and encrypted with Android Keystore; login requires phone and any Telegram OTP/2FA prompts."
-            echo "Not implemented: WhatsApp Business Cloud API"
+            echo "WhatsApp: shared opted-in Excel rows, persisted row statuses and manual resume; HTTPS and Meta credentials required."
+            echo "Not implemented: background WhatsApp worker, Meta delivery webhook, WhatsApp templates."
             echo "Telegram queue: separate START/PAUSE screen; not part of the main four-channel START control."
             echo "Automated tests: NOT RUN (user instruction)"
             echo "Device/runtime/messenger/SIM/carrier tests: NOT PERFORMED (user instruction)"
@@ -116,9 +115,7 @@ jobs:
             dist/BUILD_INFO.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload dated build bundle (optional)
-        if: github.event_name == 'push'
-        continue-on-error: true
+      - name: Upload dated APK, source and checksums for PR and push
         uses: actions/upload-artifact@v4
         with:
           name: THREE-IB-LATEST-${{ env.BUILD_DATE }}-v${{ env.VERSION_NAME }}-BUNDLE

@@ -12,12 +12,14 @@ function sendJson(response, status, body) {
 }
 
 async function readJson(request) {
-  let body = "";
+  const chunks = [];
+  let length = 0;
   for await (const chunk of request) {
-    body += chunk;
-    if (body.length > 32_768) throw new Error("Request body too large");
+    length += chunk.length;
+    if (length > 32_768) throw new Error("Request body too large");
+    chunks.push(chunk);
   }
-  return JSON.parse(body);
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 const server = createServer(async (request, response) => {
@@ -44,9 +46,14 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    sendJson(response, 400, { error: "json_object_required" });
+    return;
+  }
   const recipient = typeof payload.recipient === "string" ? payload.recipient.trim() : "";
   const text = typeof payload.text === "string" ? payload.text.trim() : "";
-  if (payload.optIn !== true || !recipient || !/^\+[1-9][0-9]{7,14}$/.test(recipient) || !text) {
+  if (payload.optIn !== true || !recipient || !/^\+[1-9][0-9]{7,14}$/.test(recipient)
+      || !text || text.length > 4096) {
     sendJson(response, 400, { error: "valid_recipient_text_and_opt_in_required" });
     return;
   }
@@ -76,14 +83,20 @@ const server = createServer(async (request, response) => {
 
   const result = await metaResponse.json().catch(() => ({}));
   if (!metaResponse.ok) {
-    sendJson(response, 502, { error: "meta_rejected_request", status: "FAILED" });
+    sendJson(response, 502, {
+      error: "meta_rejected_request",
+      status: metaResponse.status >= 500 ? "REVIEW" : "FAILED"
+    });
     return;
   }
 
-  sendJson(response, 202, {
-    status: "SUBMITTED",
-    messageId: result.messages?.[0]?.id ?? null
-  });
+  const messageId = result?.messages?.[0]?.id;
+  if (typeof messageId !== "string" || !messageId) {
+    sendJson(response, 502, { error: "meta_response_missing_message_id", status: "REVIEW" });
+    return;
+  }
+
+  sendJson(response, 202, { status: "SUBMITTED", messageId });
 });
 
 server.listen(port, "0.0.0.0", () => {
