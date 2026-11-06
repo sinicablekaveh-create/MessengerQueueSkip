@@ -104,6 +104,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     }
     @Override public void onInterrupt() { }
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+        if(e==null||e.getPackageName()==null||targetPackage.isEmpty()||
+           !targetPackage.equals(e.getPackageName().toString()))return;
         lastUiEventAt=android.os.SystemClock.uptimeMillis();
         if(!running||paused)return;
         if(e.getEventType()==AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
@@ -239,9 +241,10 @@ public class QueueAccessibilityService extends AccessibilityService {
         if(!running)return "STOPPED";
         if(paused)return "PAUSED";
         if(!networkReady())return "WAITING FOR NETWORK";
-        if(calibrationMode)return "RELIABILITY GATE: "+currentMessenger+" / "+phone;
+        if(calibrationMode)return "RELIABILITY GATE: "+currentMessenger+" / "+QueueDb.privatePhone(phone);
         if(waitingForNext)return "WAITING FOR NEXT DUE QUEUE";
-        return "RUNNING: "+currentMessenger+" / "+phone+(imageMode?" / IMAGE":" / TEXT");
+        return "RUNNING: "+currentMessenger+" / "+QueueDb.privatePhone(phone)+
+                (imageMode?" / IMAGE":" / TEXT");
     }
 
     private String chooseNextMessenger() {
@@ -374,7 +377,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         if(!networkReady()){networkChanged(false);schedule(1500);return;}
         generation++;
         resetAttempt(false);
-        QueueDb.log(this,"TEXT "+currentMessenger+" -> "+phone);
+        QueueDb.log(this,"TEXT "+currentMessenger+" -> "+QueueDb.privatePhone(phone));
         try {
             Intent open=getPackageManager().getLaunchIntentForPackage(targetPackage);
             if(open==null){failAttempt("App not installed or launcher missing");return;}
@@ -394,7 +397,7 @@ public class QueueAccessibilityService extends AccessibilityService {
         generation++;
         resetAttempt(true);
         QueueDb.status(this,rowIndex,currentMessenger,"in_flight");
-        QueueDb.log(this,"IMAGE "+currentMessenger+" -> "+phone);
+        QueueDb.log(this,"IMAGE "+currentMessenger+" -> "+QueueDb.privatePhone(phone));
         try {
             Uri image=Uri.parse(imageUri);
             grantUriPermission(targetPackage,image,Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -432,10 +435,11 @@ public class QueueAccessibilityService extends AccessibilityService {
         }
         if(imageMode) {
             QueueDb.status(this,rowIndex,currentMessenger,"review");
-            QueueDb.log(this,"REVIEW "+phone+" via "+currentMessenger+": image could not be sent safely");
+            QueueDb.log(this,"REVIEW "+QueueDb.privatePhone(phone)+" via "+currentMessenger+
+                    ": image could not be sent safely");
         } else {
             QueueDb.status(this,rowIndex,currentMessenger,"skipped");
-            QueueDb.log(this,"SKIP "+phone+" via "+currentMessenger+": "+reason);
+            QueueDb.log(this,"SKIP "+QueueDb.privatePhone(phone)+" via "+currentMessenger+": "+reason);
         }
         processed++;
         finishMessengerSlot();
@@ -638,14 +642,16 @@ public class QueueAccessibilityService extends AccessibilityService {
     private synchronized void markReview(String reason) {
         if(!running||rowIndex<0)return;
         QueueDb.status(this,rowIndex,currentMessenger,"review");
-        QueueDb.log(this,"REVIEW REQUIRED "+phone+" via "+currentMessenger+": "+reason);
+        QueueDb.log(this,"REVIEW REQUIRED "+QueueDb.privatePhone(phone)+" via "+
+                currentMessenger+": "+reason);
         processed++;
         finishMessengerSlot();
     }
 
     private synchronized void finishTextSubmitted(String detail) {
         if(!running||rowIndex<0)return;
-        QueueDb.log(this,"TEXT UI CONFIRMED "+phone+" via "+currentMessenger+" ("+detail+")");
+        QueueDb.log(this,"TEXT UI CONFIRMED "+QueueDb.privatePhone(phone)+" via "+
+                currentMessenger+" ("+detail+")");
         sendInProgress=false;
         awaitingResult=false;
         if(imageUri!=null&&!imageUri.trim().isEmpty()){
@@ -661,7 +667,8 @@ public class QueueAccessibilityService extends AccessibilityService {
     private synchronized void completeTask(String detail) {
         if(!running||rowIndex<0)return;
         QueueDb.status(this,rowIndex,currentMessenger,"submitted");
-        QueueDb.log(this,"SUBMITTED "+phone+" via "+currentMessenger+" ("+detail+")");
+        QueueDb.log(this,"SUBMITTED "+QueueDb.privatePhone(phone)+" via "+
+                currentMessenger+" ("+detail+")");
         processed++;
         finishMessengerSlot();
     }
@@ -796,7 +803,8 @@ public class QueueAccessibilityService extends AccessibilityService {
         stage=100;
         calibrationMode=true;
         QueueDb.put(this,"calib_"+currentMessenger.toLowerCase(Locale.US),"CHECKING");
-        QueueDb.log(this,"RELIABILITY DRY-RUN "+currentMessenger+" -> "+phone+" (NO SEND)");
+        QueueDb.log(this,"RELIABILITY DRY-RUN "+currentMessenger+" -> "+
+                QueueDb.privatePhone(phone)+" (NO SEND)");
         try {
             Intent open=getPackageManager().getLaunchIntentForPackage(targetPackage);
             if(open==null){calibrationFail("Launcher missing for "+currentMessenger);return;}

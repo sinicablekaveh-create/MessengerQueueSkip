@@ -175,6 +175,7 @@ public class QueueKeeperService extends Service {
                  state+" | Network: "+network+"\n"+QueueDb.summary(this)))
          .setOngoing(true)
          .setOnlyAlertOnce(true)
+         .setVisibility(Notification.VISIBILITY_PRIVATE)
          .setCategory(Notification.CATEGORY_SERVICE)
          .setContentIntent(content)
          .addAction(new Notification.Action.Builder(

@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        QueueDb.sanitizeStoredLogs(this);
 
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(true);
@@ -54,11 +54,6 @@ public class MainActivity extends Activity {
         root.setPadding(dp(20),dp(23),dp(20),dp(24));
         scroll.addView(root);
         setContentView(scroll);
-
-        if(Build.VERSION.SDK_INT>=33 &&
-           checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
-            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},533);
-        }
 
         root.addView(label("MESSENGER QUEUE SKIP",26,Color.WHITE,true));
         root.addView(label("3 independent queues • Excel contacts • text + optional image • persistent START",13,0xFFBAC8DB,false));
@@ -149,13 +144,18 @@ public class MainActivity extends Activity {
         addContacts=new CheckBox(this);
         addContacts.setText("Create uniquely named local contacts when needed for messenger search.");
         addContacts.setTextColor(0xFFD1DFE9);
-        addContacts.setChecked("1".equals(QueueDb.get(this,"addContacts","1")));
+        addContacts.setChecked("1".equals(QueueDb.get(this,"addContacts","0")));
         root.addView(addContacts);
 
         keepAwake=new CheckBox(this);
         keepAwake.setText("Keep CPU/screen awake while automatic queues are running.");
         keepAwake.setTextColor(0xFFD1DFE9);
         keepAwake.setChecked("1".equals(QueueDb.get(this,"keep_awake","1")));
+        applyKeepScreenOn(keepAwake.isChecked());
+        keepAwake.setOnCheckedChangeListener((button,checked)->{
+            QueueDb.put(this,"keep_awake",checked?"1":"0");
+            applyKeepScreenOn(checked);
+        });
         root.addView(keepAwake);
 
         root.addView(label("HIGH RELIABILITY GATE: START first performs a no-send dry-run in every enabled messenger. Search, recipient match, composer, Send control, and optional image-share route must all pass before any real queue is released.",12,0xFFFFD58A,true));
@@ -190,7 +190,7 @@ public class MainActivity extends Activity {
         logs.setTypeface(Typeface.MONOSPACE);
         logs.setPadding(dp(12),dp(12),dp(12),dp(12));
         logs.setBackground(bg(0xFF19283D,10));root.addView(logs);
-        addButton(root,"COPY LOG",0xFF405F80,()->{
+        addButton(root,"COPY REDACTED LOG",0xFF405F80,()->{
             android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("MQS log",QueueDb.get(this,"logs","")));
             toast("Queue log copied.");
@@ -569,6 +569,8 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume(){
         super.onResume();
+        applyKeepScreenOn(keepAwake==null?
+                "1".equals(QueueDb.get(this,"keep_awake","1")):keepAwake.isChecked());
         handler.post(ticker);
         handler.postDelayed(()->{
             if("1".equals(QueueDb.get(this,"pending_auto_start","0"))) {
@@ -593,7 +595,29 @@ public class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){
         super.onRequestPermissionsResult(requestCode,permissions,grantResults);
         QueueDb.put(this,"pending_prompt","");
+        boolean granted=grantResults.length>0;
+        for(int result:grantResults) {
+            if(result!=android.content.pm.PackageManager.PERMISSION_GRANTED){granted=false;break;}
+        }
+        if(requestCode==532&&!granted) {
+            addContacts.setChecked(false);
+            QueueDb.put(this,"addContacts","0");
+            toast("Contacts permission denied. Contact aliases are off; phone search will still be used.");
+            handler.postDelayed(this::continueAutomaticStart,300);
+            return;
+        }
+        if(requestCode==533&&!granted) {
+            QueueDb.put(this,"pending_auto_start","0");
+            QueueDb.put(this,"pending_test_one","0");
+            toast("Notification permission is required for the visible queue service. START cancelled.");
+            return;
+        }
         handler.postDelayed(this::continueAutomaticStart,300);
+    }
+
+    private void applyKeepScreenOn(boolean enabled){
+        if(enabled)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     private TextView label(String s,int sp,int color,boolean bold){

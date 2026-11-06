@@ -1,23 +1,50 @@
-# Messenger Queue Skip v1.2.0
+# THREE IB — Messenger Queue Skip v2.8.0
 
-A consent-based Android queue controller for Bale, Rubika and Eitaa. Uses device-installed apps and the Android Accessibility UI, not unsupported direct messaging APIs.
+Android queue controller for user-approved recipients in Bale, Rubika and Eitaa. It drives the visible UI of the installed messenger apps through an Accessibility service; it does not use unofficial messaging APIs and it does not claim server delivery.
 
-## Improvements
-- Search by mobile number or an optional, uniquely tagged MQS phone contact after explicit Contacts permission.
-- Accept chat candidates only when the phone suffix or known tagged alias is visible.
-- A new **TEST ONE CONTACT** action allows a single recipient trial before starting the whole queue.
-- Queue scheduling now guards against repeated UI events and preserves delay across Pause/Resume.
-- After tapping Send, waits to see the composer cleared AND a new matching outgoing message node. Status "UI confirmed" means this local UI condition was observed; **it is not delivery confirmation**.
-- Uncertain sends are marked REVIEW and stop the queue, preventing automatic duplicate retries or fallback to another messenger.
-- Copyable diagnostic logs, 1–1440-minute delays, optional fallback and Skip, imported contact deduplication.
+## Current behavior
 
-## Installation and testing
-Download the APK from GitHub Actions > latest successful run > Artifacts. For an APK installed outside the app store, Android may initially block Accessibility with Restricted settings. Only enable this sensitive permission if you trust the app and its source.
-Import an .xlsx file with consented mobile numbers in column A or a CSV first column. Enable Accessibility, select Bale/Rubika/Eitaa and your message. Use TEST ONE CONTACT before START AUTOMATIC. Keep the phone unlocked and installed messenger logged in.
+- Imports Iranian mobile numbers from column A of `.xlsx` files or the first CSV column.
+- Maintains independent, persistent Bale, Rubika and Eitaa queue states with 1–1440 minute minimum delays.
+- Requires a user confirmation that recipients agreed to receive the message.
+- Runs a no-send reliability check before releasing a full queue.
+- Verifies the visible recipient, exact text composer and Send control before acting.
+- Marks ambiguous or interrupted attempts for review instead of retrying blindly.
+- Supports an optional image through Android's standard share flow.
+- Keeps a user-started foreground watchdog with pause and stop controls.
+- Optionally creates uniquely tagged phone contacts when the user enables that setting and grants Contacts access.
 
-## Limits
-- This release **has been compiled and signed locally** using Android SDK Tools 35, but has not been tested on the user's Android phone or with logged-in messenger accounts.
-- Search and send UI can change without warning. There is no official verified phone-number deep link for these three messenger apps.
-- UI-confirmed is not a server read/delivery receipt; only the messenger itself can report those.
-- Contact alias creation is off by default and creates entries in your phone's address book. Use only with recipients who consented.
-- The GitHub Actions debug signer may differ from previous versions. Android may require uninstalling an older debug APK to install this one; uninstalling loses local queue data.
+## v2.8 privacy and build hardening
+
+- Accessibility events are limited to the three supported messenger packages.
+- Full recipient phone numbers are removed from the ongoing notification and redacted from stored/copyable logs.
+- Contact alias creation is off for new installations and remains optional.
+- Denied permissions no longer cause an automatic prompt loop.
+- The screen-awake preference now controls the Activity window flag.
+- Pull requests compile, package and verify the APK; the obsolete v1 `android-app` workflow was removed.
+- CI reads the version from `app/build.gradle.kts`, so manifest and artifact versions cannot silently drift.
+
+The supplied SmsForwarder archive was reviewed as an architecture reference. No SmsForwarder code, SMS receiver or SMS permission is included in this release. Adding SMS ingestion would require a separate opt-in privacy design because SMS content can contain authentication codes and private messages.
+
+## Installation and use
+
+1. Download the APK from the latest successful GitHub Actions artifact.
+2. Install and sign in to Bale, Rubika and Eitaa directly.
+3. Import a consented `.xlsx` or CSV recipient list.
+4. Enter the exact message and enable only the desired queues.
+5. Enable the app's Accessibility service after reviewing Android's warning.
+6. Use **TEST ONE QUEUE TASK** before **START AUTOMATIC**.
+7. Keep the phone unlocked while UI automation is active and inspect every `REVIEW` result before retrying.
+
+Android may show **Restricted settings** for Accessibility on sideloaded APKs. Battery restrictions, Force stop, messenger UI changes and device lock state can pause or prevent the queue.
+
+## Privacy and reliability limits
+
+- Recipient data and queue state stay in this app's private local storage.
+- Optional contact aliases modify the device address book only after explicit permission.
+- Accessibility can read the visible screens of the three supported messenger packages while enabled.
+- `SUBMITTED` means local UI evidence was observed. It is not a server receipt, delivery receipt or read receipt.
+- A GitHub Actions artifact is signed with a temporary debug key unless a stable release-signing workflow is configured. A differently signed build cannot upgrade an installed APK without migration planning; uninstalling would erase local app data.
+- The app has not been validated against every current Bale, Rubika and Eitaa UI version or on every Android/OEM battery policy.
+
+Package ID remains `com.sinicable.messengerqueue` so existing local data and upgrade identity are not intentionally replaced.
