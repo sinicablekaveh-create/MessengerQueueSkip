@@ -188,6 +188,24 @@ final class QueueDb {
         return "1".equals(get(c,"enabled_sms","0"));
     }
 
+    static synchronized int optedInCount(Context c) {
+        JSONArray a=items(c);int count=0;
+        for(int i=0;i<a.length();i++) {
+            JSONObject v=a.optJSONObject(i);
+            if(v!=null&&v.optBoolean("opt_in",false))count++;
+        }
+        return count;
+    }
+
+    static synchronized int smsEligibleCount(Context c) {
+        JSONArray a=items(c);int count=0;
+        for(int i=0;i<a.length();i++) {
+            JSONObject v=a.optJSONObject(i);
+            if(v!=null&&v.optBoolean("opt_in",false)&&v.optBoolean("send_sms",false))count++;
+        }
+        return count;
+    }
+
     static synchronized long smsDue(Context c){return due(c,"SMS");}
     static synchronized void smsDue(Context c,long when){due(c,"SMS",when);}
     static synchronized int smsDelayMinutes(Context c){return delayMinutes(c,"SMS");}
