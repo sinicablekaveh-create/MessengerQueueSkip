@@ -6,8 +6,8 @@ android {
         applicationId = "com.sinicable.messengerqueue"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "2.9.1"
+        versionCode = 18
+        versionName = "3.2.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
@@ -16,4 +16,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+
+dependencies {
+    implementation("io.github.tdlib-android:core:0.1.1")
 }
