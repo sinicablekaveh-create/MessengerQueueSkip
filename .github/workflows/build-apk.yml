@@ -17,6 +17,9 @@ jobs:
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -27,9 +30,6 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Install Android SDK packages
-        env:
-          ANDROID_HOME: /usr/local/lib/android/sdk
-          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
           set -euo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -42,8 +42,8 @@ jobs:
           import os, pathlib, re
           from datetime import datetime, timezone
           text = pathlib.Path("app/build.gradle.kts").read_text(encoding="utf-8")
-          code = re.search(r"versionCode\\s*=\\s*(\\d+)", text)
-          name = re.search(r'versionName\\s*=\\s*"([^"]+)"', text)
+          code = re.search(r"versionCode\s*=\s*(\d+)", text)
+          name = re.search(r'versionName\s*=\s*"([^"]+)"', text)
           if not code or not name:
               raise SystemExit("Unable to read Android version")
           now = datetime.now(timezone.utc)
@@ -56,12 +56,12 @@ jobs:
           values["APK_NAME"] = f"THREE-IB-LATEST-{values['BUILD_DATE']}-v{values['VERSION_NAME']}.apk"
           values["SOURCE_ZIP_NAME"] = f"THREE-IB-SOURCE-LATEST-{values['BUILD_DATE']}-v{values['VERSION_NAME']}.zip"
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
-              for k, v in values.items(): f.write(f"{k}={v}\\n")
+              for k, v in values.items():
+                  f.write(f"{k}={v}\n")
           PY
       - name: Compile and package installable APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - name: Verify APK signature and package metadata
-        shell: bash
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
@@ -85,7 +85,7 @@ jobs:
             echo "Commit: $GITHUB_SHA"
             echo "Package: com.sinicable.messengerqueue"
             echo "Implemented: Bale, Rubika, Eitaa, SMS SIM, Telegram TDLib"
-            echo "Telegram setup: user enters API ID/API HASH in-app; encrypted with Android Keystore; login requires phone and any Telegram OTP/2FA prompts."
+            echo "Telegram setup: API ID/API HASH entered in-app and encrypted with Android Keystore; login requires phone and any Telegram OTP/2FA prompts."
             echo "Not implemented: WhatsApp Business Cloud API"
             echo "Telegram queue: separate START/PAUSE screen; not part of the main four-channel START control."
             echo "Automated tests: NOT RUN (user instruction)"

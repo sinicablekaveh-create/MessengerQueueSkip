@@ -22,7 +22,6 @@ public class TelegramActivity extends Activity {
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
-        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         engine = TelegramEngine.get(this);
 
         LinearLayout root = new LinearLayout(this);
