@@ -58,8 +58,8 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
-        root.addView(label("MESSENGER QUEUE SKIP",26,Color.WHITE,true));
-        root.addView(label("Bale • Rubika • Eitaa • SMS SIM • row-level consent • persistent START",13,0xFFBAC8DB,false));
+        root.addView(label("THREE IB",26,Color.WHITE,true));
+        root.addView(label("v2.9.1 • Bale • Rubika • Eitaa • SMS SIM • consent-based queues",13,0xFFBAC8DB,false));
 
         space(root,12);
         access=label("",13,0xFFFFCE75,true);root.addView(access);
