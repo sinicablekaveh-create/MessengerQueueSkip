@@ -1,1 +1,6 @@
-fix CI: validate pull requests without consuming artifact storage; keep seven-day uploads for main
+Revision history for #5:
+
+rev 2 (content) 2026-11-06 12:44 UTC — fix CI: validate pull requests without consuming artifact storage; keep seven-day uploads for main
+rev 1 (initial) 2026-11-06 12:44 UTC
+
+<!-- mergify-revision-data: {"schema_version":1,"pull_number":5,"entries":[{"number":1,"change_type":"initial","old_sha":null,"new_sha":"4b3c8cfa6228162b6d7f0a45237483405e5c9b08","timestamp_iso":"2026-11-06T12:44:38Z","reason":"","replay_sha":null,"compare_url":null},{"number":2,"change_type":"content","old_sha":"4b3c8cfa6228162b6d7f0a45237483405e5c9b08","new_sha":"e0d3923c417259c136b7f6c7281642ee5c08ce45","timestamp_iso":"2026-11-06T12:44:38Z","reason":"fix CI: validate pull requests without consuming artifact storage; keep seven-day uploads for main","replay_sha":null,"compare_url":"https://github.com/sinicablekaveh-create/MessengerQueueSkip/compare/4b3c8cfa6228162b6d7f0a45237483405e5c9b08...e0d3923c417259c136b7f6c7281642ee5c08ce45"}]} -->
