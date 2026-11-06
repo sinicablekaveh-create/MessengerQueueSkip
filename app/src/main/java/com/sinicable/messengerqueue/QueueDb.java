@@ -7,16 +7,21 @@ import org.json.JSONObject;
 import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Local-only durable three-messenger queue. No uploaded contacts, analytics or network communication. */
 final class QueueDb {
     static final String[] APPS={"Bale","Rubika","Eitaa"};
+    private static final Pattern PRIVATE_PHONE=Pattern.compile(
+            "(?<![0-9])(?:\\+98|0098|98|0)?9[0-9]{9}(?![0-9])");
 
     private static SharedPreferences prefs(Context c) {
         return c.getApplicationContext().getSharedPreferences("queue_v1", Context.MODE_PRIVATE);
     }
     static synchronized String get(Context c, String k, String def) {
-        return prefs(c).getString(k, def);
+        String value=prefs(c).getString(k, def);
+        return "logs".equals(k)?redactPhoneNumbers(value):value;
     }
     static synchronized void put(Context c, String k, String val) {
         prefs(c).edit().putString(k, val).apply();
@@ -178,9 +183,33 @@ final class QueueDb {
     static synchronized void log(Context c, String s) {
         String old=get(c,"logs","");
         String line=new java.text.SimpleDateFormat("HH:mm:ss",java.util.Locale.US)
-                .format(new java.util.Date())+"  "+s+"\n";
+                .format(new java.util.Date())+"  "+redactPhoneNumbers(s)+"\n";
         String all=old+line;
         if(all.length()>12000)all=all.substring(all.length()-12000);
         prefs(c).edit().putString("logs",all).apply();
+    }
+
+    static synchronized void sanitizeStoredLogs(Context c) {
+        String raw=prefs(c).getString("logs","");
+        String safe=redactPhoneNumbers(raw);
+        if(!safe.equals(raw))prefs(c).edit().putString("logs",safe).commit();
+    }
+
+    static String privatePhone(String value) {
+        if(value==null)return "recipient";
+        String digits=value.replaceAll("[^0-9]","");
+        if(digits.length()<4)return "recipient";
+        return "recipient ••••"+digits.substring(digits.length()-4);
+    }
+
+    private static String redactPhoneNumbers(String value) {
+        if(value==null||value.isEmpty())return value==null?"":value;
+        Matcher matcher=PRIVATE_PHONE.matcher(value);
+        StringBuffer safe=new StringBuffer();
+        while(matcher.find()) {
+            matcher.appendReplacement(safe,Matcher.quoteReplacement(privatePhone(matcher.group())));
+        }
+        matcher.appendTail(safe);
+        return safe.toString();
     }
 }

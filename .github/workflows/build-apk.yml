@@ -2,7 +2,13 @@ name: Build Messenger Queue Skip APK
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -12,11 +18,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+      - name: Read app version
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          build = pathlib.Path("app/build.gradle.kts").read_text(encoding="utf-8")
+          version_code = re.search(r"versionCode\s*=\s*(\d+)", build)
+          version_name = re.search(r'versionName\s*=\s*"([^"]+)"', build)
+          if not version_code or not version_name:
+              raise SystemExit("Unable to read versionCode/versionName")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"VERSION_CODE={version_code.group(1)}\n")
+              env.write(f"VERSION_NAME={version_name.group(1)}\n")
+          PY
       - name: Install Android SDK packages
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
@@ -35,9 +58,12 @@ jobs:
           OUT="$RUNNER_TEMP/mqs"
           mkdir -p "$OUT/classes" "$OUT/dex" "$ROOT/app/build/outputs/apk/debug"
           python3 - "$OUT/AndroidManifest.xml" <<'PY'
-          import pathlib,sys
+          import os,pathlib,sys
           text=pathlib.Path("app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
-          text=text.replace('<manifest xmlns:android=', '<manifest package="com.sinicable.messengerqueue" android:versionCode="14" android:versionName="2.7.0" xmlns:android=',1)
+          attrs=(f'<manifest package="com.sinicable.messengerqueue" '
+                 f'android:versionCode="{os.environ["VERSION_CODE"]}" '
+                 f'android:versionName="{os.environ["VERSION_NAME"]}" xmlns:android=')
+          text=text.replace('<manifest xmlns:android=',attrs,1)
           pathlib.Path(sys.argv[1]).write_text(text,encoding="utf-8")
           PY
           "$TOOLS/aapt2" compile --dir app/src/main/res -o "$OUT/resources.zip"
@@ -51,10 +77,14 @@ jobs:
           PY
           "$TOOLS/zipalign" -f -p 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
           keytool -genkeypair -keystore "$OUT/debug.keystore" -alias androiddebugkey -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 3650 -noprompt
-          "$TOOLS/apksigner" sign --ks "$OUT/debug.keystore" --ks-pass pass:android --key-pass pass:android --out "$ROOT/app/build/outputs/apk/debug/MessengerQueueSkip-v2.7.0.apk" "$OUT/aligned.apk"
-          "$TOOLS/apksigner" verify --verbose "$ROOT/app/build/outputs/apk/debug/MessengerQueueSkip-v2.7.0.apk"
+          APK="$ROOT/app/build/outputs/apk/debug/MessengerQueueSkip-v${VERSION_NAME}.apk"
+          "$TOOLS/apksigner" sign --ks "$OUT/debug.keystore" --ks-pass pass:android --key-pass pass:android --out "$APK" "$OUT/aligned.apk"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          "$TOOLS/aapt2" dump badging "$APK" | head -20
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
-          name: MessengerQueueSkip-v2.7.0-APK
-          path: app/build/outputs/apk/debug/MessengerQueueSkip-v2.7.0.apk
+          name: MessengerQueueSkip-v${{ env.VERSION_NAME }}-APK
+          path: app/build/outputs/apk/debug/MessengerQueueSkip-v${{ env.VERSION_NAME }}.apk
           if-no-files-found: error
+          retention-days: 7
