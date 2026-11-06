@@ -26,6 +26,9 @@ import android.widget.Toast;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
+import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends Activity {
@@ -33,9 +36,9 @@ public class MainActivity extends Activity {
     private static final int IMAGE_PICKER=513;
     private final Handler handler=new Handler(Looper.getMainLooper());
 
-    private EditText message,accountPhone,baleDelay,rubikaDelay,eitaaDelay;
-    private CheckBox approved,addContacts,keepAwake,baleEnabled,rubikaEnabled,eitaaEnabled;
-    private TextView status,logs,access,reliability,imageLabel,readiness;
+    private EditText message,accountPhone,baleDelay,rubikaDelay,eitaaDelay,smsDelay;
+    private CheckBox approved,addContacts,keepAwake,baleEnabled,rubikaEnabled,eitaaEnabled,smsEnabled;
+    private TextView status,logs,access,reliability,imageLabel,readiness,smsSimLabel;
     private String imageUri="";
 
     private final Runnable ticker=new Runnable(){
@@ -55,8 +58,8 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
-        root.addView(label("MESSENGER QUEUE SKIP",26,Color.WHITE,true));
-        root.addView(label("3 independent queues • Excel contacts • text + optional image • persistent START",13,0xFFBAC8DB,false));
+        root.addView(label("THREE IB",26,Color.WHITE,true));
+        root.addView(label("v2.9.1 • Bale • Rubika • Eitaa • SMS SIM • consent-based queues",13,0xFFBAC8DB,false));
 
         space(root,12);
         access=label("",13,0xFFFFCE75,true);root.addView(access);
@@ -105,13 +108,19 @@ public class MainActivity extends Activity {
         status=label("",13,0xFFC7D4E4,true);root.addView(status);
 
         space(root,14);
-        root.addView(label("4  THREE INDEPENDENT QUEUES",17,Color.WHITE,true));
+        root.addView(label("4  CHANNEL QUEUES",17,Color.WHITE,true));
         baleEnabled=queueToggle(root,"BALE", "bale",0xFF2D8FCE);
         baleDelay=delayBox(root,"Bale delay (minutes)","bale");
         rubikaEnabled=queueToggle(root,"RUBIKA","rubika",0xFF9255D6);
         rubikaDelay=delayBox(root,"Rubika delay (minutes)","rubika");
         eitaaEnabled=queueToggle(root,"EITAA","eitaa",0xFF1B9A74);
         eitaaDelay=delayBox(root,"Eitaa delay (minutes)","eitaa");
+        smsEnabled=queueToggle(root,"SMS SIM","sms",0xFF40A6A6);
+        smsDelay=delayBox(root,"SMS delay (minutes)","sms");
+        smsSimLabel=label("",12,0xFFC7D4E4,true);root.addView(smsSimLabel);
+        addButton(root,"SELECT SMS SIM",0xFF376C78,()->chooseSmsSim());
+        root.addView(label("SMS is text-only. Rows must contain opt_in=true and send_sms=true. Carrier charges may apply.",12,0xFFFFD58A,true));
+        refreshSmsSimLabel();
 
         space(root,14);
         root.addView(label("5  MESSAGE",17,Color.WHITE,true));
@@ -163,9 +172,15 @@ public class MainActivity extends Activity {
         addButton(root,"▶  START AUTOMATIC",0xFF00A768,()->start(false));
         addButton(root,"▶  TEST ONE QUEUE TASK",0xFF285C96,()->start(true));
         addButton(root,"Ⅱ  PAUSE / RESUME ALL",0xFFF1B950,()->{
+            boolean messengerOn=baleEnabled.isChecked()||rubikaEnabled.isChecked()||eitaaEnabled.isChecked();
             QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
-            if(s==null){toast("Enable Accessibility first");return;}
-            s.togglePause();refresh();
+            if(messengerOn&&s!=null)s.togglePause();
+            else {
+                boolean paused="1".equals(QueueDb.get(this,"desired_paused","0"));
+                QueueDb.put(this,"desired_paused",paused?"0":"1");
+                QueueDb.log(this,paused?"Queue resumed":"Queue paused");
+            }
+            refresh();
         });
         addButton(root,"■  STOP ALL QUEUES",0xFFE06150,()->{
             QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
@@ -204,7 +219,7 @@ public class MainActivity extends Activity {
         c.setText(title+" queue enabled");
         c.setTextColor(color);
         c.setTextSize(16);
-        c.setChecked("1".equals(QueueDb.get(this,"enabled_"+key,"1")));
+        c.setChecked("1".equals(QueueDb.get(this,"enabled_"+key,"sms".equals(key)?"0":"1")));
         root.addView(c);
         return c;
     }
@@ -226,15 +241,19 @@ public class MainActivity extends Activity {
     }
 
     private void start(boolean testOne){
-        if(!approved.isChecked()){toast("Confirm recipients' consent first");return;}
+        if(!approved.isChecked()){toast("Confirm this send session first; row-level opt_in is also required");return;}
         if(message.getText().toString().trim().isEmpty()){toast("Enter message text");return;}
-        if(!baleEnabled.isChecked()&&!rubikaEnabled.isChecked()&&!eitaaEnabled.isChecked()){
-            toast("Enable at least one messenger queue");return;
-        }
-        if(QueueDb.items(this).length()==0){toast("Import Excel/CSV recipients first");return;}
+        boolean messengerOn=baleEnabled.isChecked()||rubikaEnabled.isChecked()||eitaaEnabled.isChecked();
+        boolean smsOn=smsEnabled.isChecked();
+        if(!messengerOn&&!smsOn){toast("Enable at least one queue");return;}
+        if(testOne&&smsOn){toast("TEST ONE currently covers messenger UI queues only. Disable SMS for this test.");return;}
+        if(QueueDb.items(this).length()==0){toast("Import a headered phone,opt_in Excel/CSV first");return;}
+        if(QueueDb.optedInCount(this)==0){toast("No imported row has opt_in=true");return;}
+        if(smsOn&&QueueDb.smsEligibleCount(this)==0){toast("SMS has no eligible row with opt_in=true and send_sms=true");return;}
+        if(smsOn&&QueueDb.get(this,"sms_subscription_id","").isEmpty()){toast("Select the SMS SIM first");return;}
 
-        int bd=parseDelay(baleDelay),rd=parseDelay(rubikaDelay),ed=parseDelay(eitaaDelay);
-        if(bd<1||rd<1||ed<1){toast("Each delay must be 1 to 1440 minutes");return;}
+        int bd=parseDelay(baleDelay),rd=parseDelay(rubikaDelay),ed=parseDelay(eitaaDelay),sd=parseDelay(smsDelay);
+        if(bd<1||rd<1||ed<1||sd<1){toast("Each delay must be 1 to 1440 minutes");return;}
 
         StringBuilder missing=new StringBuilder();
         if(baleEnabled.isChecked()&&!isInstalled(packageFor("Bale")))missing.append("Bale ");
@@ -263,9 +282,11 @@ public class MainActivity extends Activity {
         QueueDb.put(this,"enabled_bale",baleEnabled.isChecked()?"1":"0");
         QueueDb.put(this,"enabled_rubika",rubikaEnabled.isChecked()?"1":"0");
         QueueDb.put(this,"enabled_eitaa",eitaaEnabled.isChecked()?"1":"0");
+        QueueDb.put(this,"enabled_sms",smsEnabled.isChecked()?"1":"0");
         QueueDb.put(this,"delay_bale",String.valueOf(bd));
         QueueDb.put(this,"delay_rubika",String.valueOf(rd));
         QueueDb.put(this,"delay_eitaa",String.valueOf(ed));
+        QueueDb.put(this,"delay_sms",String.valueOf(sd));
         QueueDb.put(this,"testOne",testOne?"1":"0");
         QueueDb.put(this,"pending_auto_start","1");
         QueueDb.put(this,"pending_test_one",testOne?"1":"0");
@@ -287,6 +308,16 @@ public class MainActivity extends Activity {
             return;
         }
 
+        if(smsEnabled.isChecked()&&
+           (checkSelfPermission(android.Manifest.permission.SEND_SMS)!=android.content.pm.PackageManager.PERMISSION_GRANTED||
+            checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE)!=android.content.pm.PackageManager.PERMISSION_GRANTED)){
+            if(!"sms_permissions".equals(QueueDb.get(this,"pending_prompt",""))){
+                QueueDb.put(this,"pending_prompt","sms_permissions");
+                requestPermissions(new String[]{android.Manifest.permission.SEND_SMS,android.Manifest.permission.READ_PHONE_STATE},534);
+            }
+            return;
+        }
+
         if(addContacts.isChecked()&&!ContactBridge.permission(this)){
             if(!"contacts".equals(QueueDb.get(this,"pending_prompt",""))){
                 QueueDb.put(this,"pending_prompt","contacts");
@@ -295,10 +326,11 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if(QueueAccessibilityService.INSTANCE==null){
+        boolean messengerOn=baleEnabled.isChecked()||rubikaEnabled.isChecked()||eitaaEnabled.isChecked();
+        if(messengerOn&&QueueAccessibilityService.INSTANCE==null){
             if(!"accessibility".equals(QueueDb.get(this,"pending_prompt",""))){
                 QueueDb.put(this,"pending_prompt","accessibility");
-                toast("Enable Messenger Queue Skip Accessibility once; START will continue automatically.");
+                toast("Enable Messenger Queue Skip Accessibility once; messenger START will continue automatically.");
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
             }
             return;
@@ -323,9 +355,9 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if(!"1".equals(QueueDb.get(this,"network_available","1"))){
+        if(messengerOn&&!"1".equals(QueueDb.get(this,"network_available","1"))){
             QueueDb.put(this,"pending_prompt","network");
-            toast("Waiting for internet/VPN. START is saved and will continue automatically.");
+            toast("Waiting for internet/VPN required by messenger queues. START is saved.");
             return;
         }
 
@@ -334,13 +366,22 @@ public class MainActivity extends Activity {
         if(baleEnabled.isChecked()&&QueueDb.due(this,"Bale")<=0)QueueDb.due(this,"Bale",System.currentTimeMillis());
         if(rubikaEnabled.isChecked()&&QueueDb.due(this,"Rubika")<=0)QueueDb.due(this,"Rubika",System.currentTimeMillis());
         if(eitaaEnabled.isChecked()&&QueueDb.due(this,"Eitaa")<=0)QueueDb.due(this,"Eitaa",System.currentTimeMillis());
+        if(smsEnabled.isChecked()&&QueueDb.smsDue(this)<=0)QueueDb.smsDue(this,System.currentTimeMillis());
 
+        QueueDb.recoverInterrupted(this);
         QueueAccessibilityService s=QueueAccessibilityService.INSTANCE;
-        if(s==null)return;
-        QueueDb.log(this,"AUTO-SETUP COMPLETE: launching Reliability Gate automatically");
-        s.startQueue();
-        if(!testOne)QueueKeeperService.start(this);
-        toast(testOne?"Single queue task started":"START accepted: auto-setup complete, Reliability Gate running.");
+        if(messengerOn) {
+            if(s==null)return;
+            QueueDb.log(this,"AUTO-SETUP COMPLETE: launching messenger Reliability Gate");
+            s.startQueue();
+        } else if(!testOne) {
+            QueueDb.put(this,"desired_running","1");
+            QueueDb.put(this,"desired_paused","0");
+            QueueKeeperService.start(this);
+            QueueDb.log(this,"AUTO-SETUP COMPLETE: SMS-only queue keeper started");
+        }
+        if(!testOne&&smsEnabled.isChecked())QueueKeeperService.start(this);
+        toast(testOne?"Single messenger queue task started":"START accepted: enabled queues are running.");
         refresh();
     }
 
@@ -357,14 +398,18 @@ public class MainActivity extends Activity {
     private ReadinessResult readinessCheck(boolean logIt){
         int passed=0,total=0;
         String fail="";
+        boolean messengerOn=baleEnabled!=null&&(baleEnabled.isChecked()||rubikaEnabled.isChecked()||eitaaEnabled.isChecked());
+        boolean smsOn=smsEnabled!=null&&smsEnabled.isChecked();
 
-        total++;
-        if(QueueAccessibilityService.INSTANCE!=null)passed++;
-        else if(fail.isEmpty())fail="Enable Accessibility";
+        if(messengerOn){
+            total++;
+            if(QueueAccessibilityService.INSTANCE!=null)passed++;
+            else if(fail.isEmpty())fail="Enable Accessibility";
 
-        total++;
-        if("1".equals(QueueDb.get(this,"network_available","1")))passed++;
-        else if(fail.isEmpty())fail="Connect to the internet/VPN required by your messengers";
+            total++;
+            if("1".equals(QueueDb.get(this,"network_available","1")))passed++;
+            else if(fail.isEmpty())fail="Connect to the internet/VPN required by your messengers";
+        }
 
         total++;
         if(!isBackgroundRestricted())passed++;
@@ -383,10 +428,8 @@ public class MainActivity extends Activity {
         else if(fail.isEmpty())fail="Enter message text";
 
         total++;
-        boolean enabled=baleEnabled!=null&&baleEnabled.isChecked() ||
-                rubikaEnabled!=null&&rubikaEnabled.isChecked() ||
-                eitaaEnabled!=null&&eitaaEnabled.isChecked();
-        if(enabled)passed++; else if(fail.isEmpty())fail="Enable at least one messenger";
+        boolean enabled=messengerOn||smsOn;
+        if(enabled)passed++; else if(fail.isEmpty())fail="Enable at least one queue";
 
         total++;
         boolean installed=true;
@@ -396,8 +439,20 @@ public class MainActivity extends Activity {
         if(installed)passed++; else if(fail.isEmpty())fail="Install/sign in to every enabled messenger";
 
         total++;
-        boolean delays=parseDelay(baleDelay)>=1&&parseDelay(rubikaDelay)>=1&&parseDelay(eitaaDelay)>=1;
+        boolean delays=parseDelay(baleDelay)>=1&&parseDelay(rubikaDelay)>=1&&parseDelay(eitaaDelay)>=1&&
+                parseDelay(smsDelay)>=1;
         if(delays)passed++; else if(fail.isEmpty())fail="Set all delays to 1..1440 minutes";
+
+        if(smsOn){
+            total++;
+            boolean smsPerm=checkSelfPermission(android.Manifest.permission.SEND_SMS)==android.content.pm.PackageManager.PERMISSION_GRANTED&&
+                    checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE)==android.content.pm.PackageManager.PERMISSION_GRANTED;
+            if(smsPerm)passed++; else if(fail.isEmpty())fail="Allow SMS and phone-state permissions";
+
+            total++;
+            if(!QueueDb.get(this,"sms_subscription_id","").isEmpty())passed++;
+            else if(fail.isEmpty())fail="Select the SMS SIM";
+        }
 
         total++;
         boolean contactsOk=!addContacts.isChecked()||ContactBridge.permission(this);
@@ -474,9 +529,9 @@ public class MainActivity extends Activity {
         final String filename=name;
         new Thread(()->{
             try {
-                List<String> contacts=ContactImporter.read(getContentResolver(),uri,filename);
+                RecipientImportParser.Result contacts=ContactImporter.read(getContentResolver(),uri,filename);
                 int imported=QueueDb.append(this,contacts);
-                runOnUiThread(()->{toast("Imported "+imported+" new contacts");refresh();});
+                runOnUiThread(()->{toast("Imported "+imported+" rows; blocked without opt-in: "+contacts.blockedRows);refresh();});
             } catch(Exception e){
                 runOnUiThread(()->toast("Import failed: "+e.getMessage()));
             }
@@ -502,14 +557,17 @@ public class MainActivity extends Activity {
     private void refresh(){
         if(status==null)return;
         boolean ready=QueueAccessibilityService.INSTANCE!=null;
-        access.setText(ready?"● Accessibility enabled":"● Accessibility disabled: enable once before START");
-        access.setTextColor(ready?0xFF57E6AC:0xFFFFC27E);
-        String mode=ready?QueueAccessibilityService.INSTANCE.state():"OFF";
+        boolean messengerOn=baleEnabled!=null&&(baleEnabled.isChecked()||rubikaEnabled.isChecked()||eitaaEnabled.isChecked());
+        access.setText(ready?"● Accessibility enabled":(messengerOn?"● Accessibility disabled: enable for messenger queues":"● Accessibility not required for SMS-only"));
+        access.setTextColor(ready||!messengerOn?0xFF57E6AC:0xFFFFC27E);
+        String mode=ready?QueueAccessibilityService.INSTANCE.state():("1".equals(QueueDb.get(this,"desired_running","0"))?"SMS RUNNING":"OFF");
         status.setText(QueueDb.summary(this)+"\nEngine: "+mode);
         ReadinessResult readyNow=readinessCheck(false);
         reliability.setText("Bale "+versionOf(packageFor("Bale"))+" ["+QueueDb.get(this,"calib_bale","NOT CHECKED")+"]"+
                 " | Rubika "+versionOf(packageFor("Rubika"))+" ["+QueueDb.get(this,"calib_rubika","NOT CHECKED")+"]"+
                 " | Eitaa "+versionOf(packageFor("Eitaa"))+" ["+QueueDb.get(this,"calib_eitaa","NOT CHECKED")+"]"+
+                "\nSMS SIM="+QueueDb.get(this,"sms_subscription_label","NOT SELECTED")+
+                " | SMS permission="+(checkSelfPermission(android.Manifest.permission.SEND_SMS)==android.content.pm.PackageManager.PERMISSION_GRANTED?"OK":"NO")+
                 "\nReliability gate="+QueueDb.get(this,"reliability_gate_last","NOT RUN")+
                 " | Keeper="+QueueDb.get(this,"keeper_health","STOPPED")+
                 " | Android Restricted="+isBackgroundRestricted()+
@@ -580,6 +638,9 @@ public class MainActivity extends Activity {
                         ("battery".equals(prompt)&&isBatteryExempt()) ||
                         ("background".equals(prompt)&&!isBackgroundRestricted()) ||
                         ("network".equals(prompt)&&"1".equals(QueueDb.get(this,"network_available","1"))) ||
+                        ("sms_permissions".equals(prompt)&&
+                            checkSelfPermission(android.Manifest.permission.SEND_SMS)==android.content.pm.PackageManager.PERMISSION_GRANTED&&
+                            checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE)==android.content.pm.PackageManager.PERMISSION_GRANTED) ||
                         prompt.isEmpty();
                 if(satisfied) {
                     QueueDb.put(this,"pending_prompt","");
@@ -612,7 +673,47 @@ public class MainActivity extends Activity {
             toast("Notification permission is required for the visible queue service. START cancelled.");
             return;
         }
+        if(requestCode==534) {
+            if(!granted) {
+                boolean wasStarting="1".equals(QueueDb.get(this,"pending_auto_start","0"));
+                QueueDb.put(this,"pending_auto_start","0");
+                QueueDb.put(this,"pending_test_one","0");
+                toast(wasStarting?"SMS permissions denied. SMS START cancelled; messenger queues remain available.":"Phone-state permission denied; SIM selection cancelled.");
+                return;
+            }
+            if(!"1".equals(QueueDb.get(this,"pending_auto_start","0")))chooseSmsSim();
+        }
         handler.postDelayed(this::continueAutomaticStart,300);
+    }
+
+    private void chooseSmsSim(){
+        if(checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{android.Manifest.permission.READ_PHONE_STATE},534);
+            return;
+        }
+        try {
+            SubscriptionManager sm=(SubscriptionManager)getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
+            List<SubscriptionInfo> list=sm==null?null:sm.getActiveSubscriptionInfoList();
+            if(list==null||list.isEmpty()){toast("No active SIM subscription found");return;}
+            ArrayList<String> labels=new ArrayList<>();
+            for(SubscriptionInfo info:list){
+                String carrier=info.getCarrierName()==null?"SIM":info.getCarrierName().toString();
+                labels.add("SIM "+(info.getSimSlotIndex()+1)+" • "+carrier+" • subscription "+info.getSubscriptionId());
+            }
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle("Select SMS SIM")
+                    .setItems(labels.toArray(new String[0]),(d,which)->{
+                        SubscriptionInfo info=list.get(which);
+                        String label=labels.get(which);
+                        QueueDb.put(this,"sms_subscription_id",String.valueOf(info.getSubscriptionId()));
+                        QueueDb.put(this,"sms_subscription_label",label);
+                        refreshSmsSimLabel();
+                    }).show();
+        } catch(Exception e){toast("SIM selection unavailable: "+e.getClass().getSimpleName());}
+    }
+
+    private void refreshSmsSimLabel(){
+        if(smsSimLabel!=null)smsSimLabel.setText("Selected: "+QueueDb.get(this,"sms_subscription_label","none"));
     }
 
     private void applyKeepScreenOn(boolean enabled){

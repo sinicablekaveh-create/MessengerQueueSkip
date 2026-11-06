@@ -1,50 +1,55 @@
-# THREE IB — Messenger Queue Skip v2.8.0
+# THREE IB — Android Queue Controller
 
-Android queue controller for user-approved recipients in Bale, Rubika and Eitaa. It drives the visible UI of the installed messenger apps through an Accessibility service; it does not use unofficial messaging APIs and it does not claim server delivery.
+**Version:** 2.9.1  
+**Version code:** 17  
+**Snapshot date:** 2026-11-06  
+**Application ID:** `com.sinicable.messengerqueue`
 
-## Current behavior
+This build contains four implemented delivery paths. It is a consent-gated Android queue controller, not a six-messenger release.
 
-- Imports Iranian mobile numbers from column A of `.xlsx` files or the first CSV column.
-- Maintains independent, persistent Bale, Rubika and Eitaa queue states with 1–1440 minute minimum delays.
-- Requires a user confirmation that recipients agreed to receive the message.
-- Runs a no-send reliability check before releasing a full queue.
-- Verifies the visible recipient, exact text composer and Send control before acting.
-- Marks ambiguous or interrupted attempts for review instead of retrying blindly.
-- Supports an optional image through Android's standard share flow.
-- Keeps a user-started foreground watchdog with pause and stop controls.
-- Optionally creates uniquely tagged phone contacts when the user enables that setting and grants Contacts access.
+## Implemented in this build
 
-## v2.8 privacy and build hardening
+- **Bale, Rubika and Eitaa:** separate persistent queues driven through each installed messenger's visible UI with Android Accessibility.
+- **SMS SIM:** a separate text-only queue using Android `SmsManager` and an explicitly selected active SIM subscription.
+- **Recipient import:** `.xlsx` and CSV files with required `phone` and `opt_in` headers. Optional columns are `opt_in_source`, `send_sms` and `message`.
+- **Consent enforcement:** each row is blocked unless `opt_in=true`. SMS additionally requires `send_sms=true`, an enabled SMS queue, an explicitly selected SIM, and Android permissions.
+- **Scheduling:** independent channel delays from 1 to 1440 minutes.
+- **Queue controls:** START AUTOMATIC, Pause/Resume, Stop and Clear.
+- **Message content:** text and optional image for the three messenger UI paths; SMS is text-only.
+- **Recovery behavior:** interrupted or uncertain sends are moved to REVIEW rather than blindly retried.
 
-- Accessibility events are limited to the three supported messenger packages.
-- Full recipient phone numbers are removed from the ongoing notification and redacted from stored/copyable logs.
-- Contact alias creation is off for new installations and remains optional.
-- Denied permissions no longer cause an automatic prompt loop.
-- The screen-awake preference now controls the Activity window flag.
-- Pull requests compile, package and verify the APK; the obsolete v1 `android-app` workflow was removed.
-- CI reads the version from `app/build.gradle.kts`, so manifest and artifact versions cannot silently drift.
+## Not included in this build
 
-The supplied SmsForwarder archive was reviewed as an architecture reference. No SmsForwarder code, SMS receiver or SMS permission is included in this release. Adding SMS ingestion would require a separate opt-in privacy design because SMS content can contain authentication codes and private messages.
+- **Telegram TDLib:** not integrated. Telegram package visibility in the manifest is not an implementation.
+- **WhatsApp Business Cloud API:** not integrated. The official Cloud API is a business-platform integration that needs Meta business assets and credentials; it is not equivalent to sending from a personal WhatsApp app.
+- Therefore this artifact must not be described as a completed six-channel THREE IB release.
 
-## Installation and use
+## Important operational limits
 
-1. Download the APK from the latest successful GitHub Actions artifact.
-2. Install and sign in to Bale, Rubika and Eitaa directly.
-3. Import a consented `.xlsx` or CSV recipient list.
-4. Enter the exact message and enable only the desired queues.
-5. Enable the app's Accessibility service after reviewing Android's warning.
-6. Use **TEST ONE QUEUE TASK** before **START AUTOMATIC**.
-7. Keep the phone unlocked while UI automation is active and inspect every `REVIEW` result before retrying.
+- The three messenger queues depend on the installed apps' current UI, sign-in state, Accessibility permission, network, and Android power-management behavior.
+- A local `SUBMITTED` state is evidence that the app observed the messenger's send UI action. It is not a server delivery or read receipt.
+- SMS delivery callbacks depend on Android, the SIM, carrier and destination network. Carrier charges may apply.
+- Android/device policy may restrict direct SMS permission for sideloaded applications. Permission prompts alone do not guarantee carrier delivery.
+- The app cannot guarantee uninterrupted background execution on every Android/OEM build.
 
-Android may show **Restricted settings** for Accessibility on sideloaded APKs. Battery restrictions, Force stop, messenger UI changes and device lock state can pause or prevent the queue.
+## Build and verification record
 
-## Privacy and reliability limits
+- The release workflow compiles the Java sources, packages the APK, verifies the APK signature, and reads package metadata.
+- **No automated tests, manual tests, device tests, messenger-send tests, SIM tests or carrier-delivery tests are run for this snapshot**, as requested.
+- A successful compile/package/signature check is not proof of runtime behavior or message delivery.
 
-- Recipient data and queue state stay in this app's private local storage.
-- Optional contact aliases modify the device address book only after explicit permission.
-- Accessibility can read the visible screens of the three supported messenger packages while enabled.
-- `SUBMITTED` means local UI evidence was observed. It is not a server receipt, delivery receipt or read receipt.
-- A GitHub Actions artifact is signed with a temporary debug key unless a stable release-signing workflow is configured. A differently signed build cannot upgrade an installed APK without migration planning; uninstalling would erase local app data.
-- The app has not been validated against every current Bale, Rubika and Eitaa UI version or on every Android/OEM battery policy.
+## Signing and installation
 
-Package ID remains `com.sinicable.messengerqueue` so existing local data and upgrade identity are not intentionally replaced.
+The current workflow generates a temporary debug signing key for each build. The APK is installable as a sideloaded package, but a build signed with a different key cannot update an existing installation of the same package. Do not uninstall an existing installation unless its local queue data has been backed up and you accept the data-loss risk.
+
+The package ID remains `com.sinicable.messengerqueue`. Minimum Android SDK is 26; target SDK is 35.
+
+## Dated artifacts
+
+The build workflow creates a dated GitHub pre-release with three separate downloadable assets:
+
+- `THREE-IB-LATEST-YYYY-MM-DD-v2.9.1.apk`
+- `THREE-IB-SOURCE-LATEST-YYYY-MM-DD-v2.9.1.zip`
+- `SHA256SUMS.txt` for both files.
+
+The release path is used instead of GitHub Actions artifact storage.
