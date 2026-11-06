@@ -27,6 +27,12 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity android:name=".TelegramActivity" android:exported="false"/>
+        <activity android:name=".WhatsAppCloudActivity" android:exported="true" android:label="THREE IB WhatsApp">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
         <service android:name=".TelegramQueueService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started Telegram personal-account queue with visible controls"/>
         </service>
