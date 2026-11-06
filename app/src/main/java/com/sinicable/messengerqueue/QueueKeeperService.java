@@ -44,9 +44,10 @@ public class QueueKeeperService extends Service {
             QueueDb.smsRecoverStale(QueueKeeperService.this);
             SmsQueueEngine.tick(QueueKeeperService.this);
             refreshNotification();
+            boolean messengerOn=messengerQueuesEnabled();
             QueueAccessibilityService a=QueueAccessibilityService.INSTANCE;
-            String state=a==null?"Accessibility reconnect pending":a.state();
-            if(a==null) {
+            String state=messengerOn?(a==null?"Accessibility reconnect pending":a.state()):"SMS queue active";
+            if(messengerOn&&a==null) {
                 if(accessibilityMissingSince<=0)accessibilityMissingSince=System.currentTimeMillis();
                 if(System.currentTimeMillis()-accessibilityMissingSince>=30000)postAccessibilityAlert();
             } else {
@@ -78,7 +79,6 @@ public class QueueKeeperService extends Service {
 
     @Override public void onCreate(){
         super.onCreate();
-        QueueDb.recoverInterrupted(this);
         ensureChannel();
         registerNetworkMonitor();
     }
@@ -95,10 +95,11 @@ public class QueueKeeperService extends Service {
         }
         if(ACTION_TOGGLE.equals(action)){
             QueueAccessibilityService a=QueueAccessibilityService.INSTANCE;
-            if(a!=null)a.togglePause();
+            if(messengerQueuesEnabled()&&a!=null)a.togglePause();
             else {
                 boolean paused="1".equals(QueueDb.get(this,"desired_paused","0"));
                 QueueDb.put(this,"desired_paused",paused?"0":"1");
+                QueueDb.log(this,paused?"Queue resumed":"Queue paused");
             }
         }
         if(!"1".equals(QueueDb.get(this,"desired_running","0"))){
@@ -164,9 +165,12 @@ public class QueueKeeperService extends Service {
         if(Build.VERSION.SDK_INT>=23)pflags|=PendingIntent.FLAG_IMMUTABLE;
         PendingIntent content=PendingIntent.getActivity(this,1,open,pflags);
 
-        String state=QueueAccessibilityService.INSTANCE==null
-                ?"Waiting for Accessibility service"
-                :QueueAccessibilityService.INSTANCE.state();
+        boolean messengerOn=messengerQueuesEnabled();
+        String state=!messengerOn
+                ?"SMS queue active"
+                :(QueueAccessibilityService.INSTANCE==null
+                    ?"Waiting for Accessibility service"
+                    :QueueAccessibilityService.INSTANCE.state());
         String network="1".equals(QueueDb.get(this,"network_available","1"))?"ONLINE":"OFFLINE";
         boolean paused="1".equals(QueueDb.get(this,"desired_paused","0"));
 
@@ -197,6 +201,10 @@ public class QueueKeeperService extends Service {
     private void refreshNotification(){
         NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         if(nm!=null)nm.notify(NOTIFICATION_ID,buildNotification());
+    }
+
+    private boolean messengerQueuesEnabled(){
+        return QueueDb.enabled(this,"Bale")||QueueDb.enabled(this,"Rubika")||QueueDb.enabled(this,"Eitaa");
     }
 
     private void registerNetworkMonitor(){
