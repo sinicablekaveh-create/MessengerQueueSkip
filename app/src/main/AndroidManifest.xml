@@ -21,7 +21,7 @@
     </queries>
     <application
         android:allowBackup="false"
-        android:label="Messenger Queue Skip"
+        android:label="THREE IB"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
@@ -63,7 +63,7 @@
             android:name=".QueueAccessibilityService"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:label="Messenger Queue Skip automation">
+            android:label="THREE IB automation">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService"/>
             </intent-filter>
