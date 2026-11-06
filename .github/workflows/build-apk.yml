@@ -1,4 +1,4 @@
-name: Build Messenger Queue Skip APK
+name: Build THREE IB APK and source
 on:
   push:
     branches: [main]
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: android-${{ github.workflow }}-${{ github.ref }}
+  group: three-ib-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -23,25 +23,33 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Read app version
+      - name: Read app version and build date
         shell: bash
         run: |
           python3 - <<'PY'
           import os
           import pathlib
           import re
+          from datetime import datetime, timezone
 
           build = pathlib.Path("app/build.gradle.kts").read_text(encoding="utf-8")
           version_code = re.search(r"versionCode\s*=\s*(\d+)", build)
           version_name = re.search(r'versionName\s*=\s*"([^"]+)"', build)
           if not version_code or not version_name:
               raise SystemExit("Unable to read versionCode/versionName")
+          now = datetime.now(timezone.utc)
+          values = {
+              "VERSION_CODE": version_code.group(1),
+              "VERSION_NAME": version_name.group(1),
+              "BUILD_DATE": now.strftime("%Y-%m-%d"),
+              "BUILD_TIMESTAMP": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }
+          values["APK_NAME"] = f"THREE-IB-LATEST-{values['BUILD_DATE']}-v{values['VERSION_NAME']}.apk"
+          values["SOURCE_ZIP_NAME"] = f"THREE-IB-SOURCE-LATEST-{values['BUILD_DATE']}-v{values['VERSION_NAME']}.zip"
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
-              env.write(f"VERSION_CODE={version_code.group(1)}\n")
-              env.write(f"VERSION_NAME={version_name.group(1)}\n")
+              for key, value in values.items():
+                  env.write(f"{key}={value}\n")
           PY
-      - name: Test recipient consent parser
-        run: bash tools/test-recipient-import.sh
       - name: Install Android SDK packages
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
@@ -49,7 +57,7 @@ jobs:
         run: |
           yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
           /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Compile, package and sign APK with SDK tools
+      - name: Compile, package and sign APK
         shell: bash
         run: |
           set -euo pipefail
@@ -79,14 +87,52 @@ jobs:
           PY
           "$TOOLS/zipalign" -f -p 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
           keytool -genkeypair -keystore "$OUT/debug.keystore" -alias androiddebugkey -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 3650 -noprompt
-          APK="$ROOT/app/build/outputs/apk/debug/MessengerQueueSkip-v${VERSION_NAME}.apk"
+          APK="$ROOT/app/build/outputs/apk/debug/$APK_NAME"
           "$TOOLS/apksigner" sign --ks "$OUT/debug.keystore" --ks-pass pass:android --key-pass pass:android --out "$APK" "$OUT/aligned.apk"
           "$TOOLS/apksigner" verify --verbose --print-certs "$APK"
           "$TOOLS/aapt2" dump badging "$APK" | head -20
+      - name: Create dated source archive and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/$APK_NAME"
+          SOURCE_ZIP="$RUNNER_TEMP/$SOURCE_ZIP_NAME"
+          INFO="$RUNNER_TEMP/BUILD_INFO.txt"
+          {
+            echo "THREE IB build record"
+            echo "Version: $VERSION_NAME (code $VERSION_CODE)"
+            echo "Build date UTC: $BUILD_DATE"
+            echo "Build timestamp UTC: $BUILD_TIMESTAMP"
+            echo "Commit: $GITHUB_SHA"
+            echo "Ref: $GITHUB_REF"
+            echo "Package: com.sinicable.messengerqueue"
+            echo "Implemented: Bale, Rubika, Eitaa, SMS SIM"
+            echo "Not implemented: Telegram TDLib, WhatsApp Business Cloud API"
+            echo "Runtime and device tests: NOT PERFORMED (user instruction)"
+            echo "Automated test suite: NOT RUN (user instruction)"
+            echo "Build checks: Java compile, APK package, debug signature verification, package metadata"
+            echo "Signing: temporary per-run debug key; not a stable release signing identity"
+            echo "APK SHA-256:"
+            sha256sum "$APK"
+          } > "$INFO"
+          git archive --format=zip --prefix="THREE-IB-v${VERSION_NAME}-${BUILD_DATE}/" HEAD -o "$SOURCE_ZIP"
+          zip -q "$SOURCE_ZIP" "$INFO"
+          sha256sum "$APK" "$SOURCE_ZIP" > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
-        if: github.event_name != 'pull_request'
         with:
-          name: MessengerQueueSkip-v${{ env.VERSION_NAME }}-APK
-          path: app/build/outputs/apk/debug/MessengerQueueSkip-v${{ env.VERSION_NAME }}.apk
+          name: THREE-IB-LATEST-${{ env.BUILD_DATE }}-v${{ env.VERSION_NAME }}-APK
+          path: app/build/outputs/apk/debug/${{ env.APK_NAME }}
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: THREE-IB-SOURCE-LATEST-${{ env.BUILD_DATE }}-v${{ env.VERSION_NAME }}-ZIP
+          path: ${{ runner.temp }}/${{ env.SOURCE_ZIP_NAME }}
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: THREE-IB-SHA256-${{ env.BUILD_DATE }}-v${{ env.VERSION_NAME }}
+          path: SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
