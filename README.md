@@ -46,8 +46,10 @@ The package ID remains `com.sinicable.messengerqueue`. Minimum Android SDK is 26
 
 ## Dated artifacts
 
-The build workflow publishes separate artifacts named:
+The build workflow creates a dated GitHub pre-release with three separate downloadable assets:
 
 - `THREE-IB-LATEST-YYYY-MM-DD-v2.9.1.apk`
 - `THREE-IB-SOURCE-LATEST-YYYY-MM-DD-v2.9.1.zip`
-- A SHA-256 checksum file for both artifacts.
+- `SHA256SUMS.txt` for both files.
+
+The release path is used instead of GitHub Actions artifact storage.
