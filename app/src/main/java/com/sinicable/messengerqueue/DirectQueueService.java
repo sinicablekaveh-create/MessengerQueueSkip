@@ -163,14 +163,32 @@ public final class DirectQueueService extends Service {
                                 payload,alias,instance,key);
                         }
                         sendId=reply.result().optString("send_id","");
-                        if(reply.http==200 && reply.success()){
-                            state="submitted";
-                        }else if(reply.http==202 && "ACCEPTED".equals(reply.code())){
-                            state="submitted"; // durable gateway acceptance, not recipient delivery
-                        }else if(reply.http>=400&&reply.http<500 && !"SEND_UNKNOWN".equals(reply.code())){
+                        // HTTP 200/202 does not establish send success: inspect operation state.
+                        if(reply.success()){
+                            String phase=reply.result().optString("state","");
+                            if("succeeded".equals(phase)) {
+                                state="submitted";
+                            } else if("failed".equals(phase)) {
+                                state="failed";
+                            } else if(("queued".equals(phase) || "sending".equals(phase))
+                                    && !sendId.isEmpty()) {
+                                // Poll same operation by ID, without submitting a duplicate.
+                                for(int check=0;check<8 && running.get();check++){
+                                    Thread.sleep(2000L);
+                                    GatewayClient.Reply checkReply=GatewayClient.call(this,"GET",
+                                        "/send/operations/"+sendId,null,alias,instance,null);
+                                    if(!checkReply.success()) break;
+                                    phase=checkReply.result().optString("state","");
+                                    if("succeeded".equals(phase)){state="submitted";break;}
+                                    if("failed".equals(phase)){state="failed";break;}
+                                    if("unknown".equals(phase))break;
+                                }
+                            }
+                        } else if(reply.http>=400 && reply.http<500 && reply.http!=409
+                                && reply.http!=429 && !"SEND_UNKNOWN".equals(reply.code())){
                             state="failed";
                         }
-                        // 5xx, timeout, malformed body, and unknown stay REVIEW.
+                        // Unresolved queues, unknown, 409/429, 5xx and timeout remain REVIEW.
                     }catch(Exception error){
                         state="review";
                     }finally{

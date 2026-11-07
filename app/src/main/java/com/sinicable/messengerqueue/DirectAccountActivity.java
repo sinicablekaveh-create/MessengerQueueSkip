@@ -54,7 +54,7 @@ public final class DirectAccountActivity extends Activity {
         scroll.addView(column);
         setContentView(scroll);
 
-        TextView header=label(column,"THREE IB 3.3 • حساب شخصی",22);
+        TextView header=label(column,"THREE IB 3.3.1 • حساب شخصی",22);
         header.setTextColor(0xFF166346);
         label(column,"ورود با شماره و کد در همین برنامه؛ بدون بازکردن بله، روبیکا یا ایتای نصب‌شده. سرویس ارتباطی غیررسمی، محلی و قابل‌وقفه است.",13);
 
@@ -370,20 +370,23 @@ public final class DirectAccountActivity extends Activity {
         QueueDb.put(this,"direct_text",text);
         QueueDb.put(this,"direct_image_enabled",image?"1":"0");
         saveSelectedDelayQuiet();
+        // Capture UI choices before the asynchronous account check.
+        final boolean[] selectedSnapshot=new boolean[3];
         StringBuilder selectedNames=new StringBuilder();
         for(int i=0;i<3;i++){
             String provider=PROVIDERS[i];
-            QueueDb.put(this,"direct_selected_"+provider,channels[i].isChecked()?"1":"0");
-            if(channels[i].isChecked())selectedNames.append(provider).append(" ");
+            selectedSnapshot[i]=channels[i].isChecked();
+            QueueDb.put(this,"direct_selected_"+provider,selectedSnapshot[i]?"1":"0");
+            if(selectedSnapshot[i])selectedNames.append(provider).append(" ");
         }
         if(selectedNames.length()==0){toast("حداقل یک پیام‌رسان را انتخاب کن");return;}
         boolean anyPending=false;
-        for(int i=0;i<3;i++)if(channels[i].isChecked() &&
+        for(int i=0;i<3;i++)if(selectedSnapshot[i] &&
                 QueueDb.directCount(this,PROVIDERS[i],"pending")>0)anyPending=true;
         if(!anyPending){toast("مخاطب رضایت‌دادهٔ در انتظار ارسال وجود ندارد");return;}
         network("بررسی حساب‌ها و شروع صف",()->{
             waitForGateway();
-            for(int i=0;i<3;i++)if(channels[i].isChecked()){
+            for(int i=0;i<3;i++)if(selectedSnapshot[i]){
                 String p=PROVIDERS[i];
                 if(instance(p).isEmpty())throw new IllegalStateException("برای "+LABELS[i]+" ابتدا با شماره و کد وارد شو");
                 JSONObject state=account(p);

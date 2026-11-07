@@ -1,4 +1,4 @@
-# THREE IB Personal v3.3.0 • Direct native account gateway
+# THREE IB Personal v3.3.1 • Direct native account gateway
 
 This is a **separate stacked follow-up** to PR #9. It does not rewrite PR #8 or PR #9.
 
