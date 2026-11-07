@@ -44,6 +44,8 @@ final class AppStyle {
     }
 
     static void decorate(Activity a,View root) {
+        a.getWindow().setStatusBarColor(0xff0b4055);
+        a.getWindow().setNavigationBarColor(0xff102b3c);
         if(root instanceof LinearLayout) ((LinearLayout)root).setBackgroundColor(PAGE);
         decorateChildren(a,root);
     }
@@ -76,7 +78,6 @@ final class AppStyle {
             e.setTextColor(TEXT);
             e.setHintTextColor(MUTED);
             e.setTextSize(15);
-            e.setSingleLine(false);
             e.setPadding(dp(a,15),dp(a,13),dp(a,15),dp(a,13));
             e.setBackground(rounded(SURFACE,0xffd5e0eb,13,a));
             ViewGroup.LayoutParams lp=e.getLayoutParams();
