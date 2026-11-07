@@ -432,6 +432,7 @@ public final class DirectAccountActivity extends Activity {
         StringBuilder out=new StringBuilder(note).append("\n");
         for(int i=0;i<3;i++){
             String p=PROVIDERS[i];
+            if(!fixedProvider.isEmpty()&&!fixedProvider.equals(p))continue;
             out.append(LABELS[i]).append(": انتظار ")
                     .append(QueueDb.directCount(this,p,"pending"))
                     .append(" | پذیرفته‌شده ")
