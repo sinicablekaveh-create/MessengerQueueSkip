@@ -6,9 +6,11 @@ android {
         applicationId = "com.sinicable.messengerqueue"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "3.2.1"
+        versionCode = 20
+        versionName = "3.3.0"
     }
+    packaging { jniLibs { useLegacyPackaging = true; keepDebugSymbols.add("**/libgoomni.so") } }
+    ndk { abiFilters.add("arm64-v8a") }
     buildTypes {
         release { isMinifyEnabled = false }
     }
