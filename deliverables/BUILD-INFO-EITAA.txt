@@ -1,0 +1,11 @@
+THREE IB separate app v4.0.0
+Channel: eitaa
+Package: com.sinicable.threeib.eitaa
+Version code: 24
+Build timestamp UTC: 2026-11-07T14:02:23Z
+Commit: b5bd3f755e0495f0266415ca6e45146669c757d2
+Signing: GitHub Actions debug signature; not stable production signing.
+Account mode: phone + OTP + optional 2FA inside APK through bundled localhost GoOmni gateway.
+No installed messenger application is launched or screen-controlled.
+Provider implementation is unofficial and live account delivery is not asserted by this build.
+Recipient policy: per-row opt_in=true required; SMS additionally requires send_sms=true.

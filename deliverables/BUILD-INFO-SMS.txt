@@ -1,0 +1,9 @@
+THREE IB separate app v4.0.0
+Channel: sms
+Package: com.sinicable.threeib.sms
+Version code: 24
+Build timestamp UTC: 2026-11-07T14:02:23Z
+Commit: b5bd3f755e0495f0266415ca6e45146669c757d2
+Signing: GitHub Actions debug signature; not stable production signing.
+Mode: Android SmsManager using selected active SIM subscription; text-only; SEND_SMS runtime permission.
+Recipient policy: per-row opt_in=true required; SMS additionally requires send_sms=true.

@@ -1,0 +1,10 @@
+THREE IB separate app v4.0.0
+Channel: whatsapp
+Package: com.sinicable.threeib.whatsapp
+Version code: 24
+Build timestamp UTC: 2026-11-07T14:02:23Z
+Commit: b5bd3f755e0495f0266415ca6e45146669c757d2
+Signing: GitHub Actions debug signature; not stable production signing.
+Mode: official WhatsApp Business Cloud API client queue.
+Requires authorized Meta Business backend HTTPS endpoint and runtime service token.
+Recipient policy: per-row opt_in=true required; SMS additionally requires send_sms=true.
