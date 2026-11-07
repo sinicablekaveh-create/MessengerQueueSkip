@@ -1,26 +1,28 @@
-# THREE IB v4.0.1 — Six separate Android applications
+# THREE IB 4.0.3 | Six independent APK flavors
 
-This branch builds six independently installable APKs from one source tree.
+Six separate Android applications are compiled from one source code tree. Each has its own app ID, launcher, Android-private storage, and recipient/queue interface. The six named source ZIPs each include the shared sources and a TARGET_CHANNEL.txt build selector.
 
-| Flavor | Package | Dedicated entry point |
-|---|---|---|
-| Bale | com.sinicable.threeib.bale | In-app personal-account phone/OTP/2FA |
-| Rubika | com.sinicable.threeib.rubika | In-app personal-account phone/OTP/2FA |
-| Eitaa | com.sinicable.threeib.eitaa | In-app personal-account phone/OTP/2FA |
-| Telegram | com.sinicable.threeib.telegram | TDLib login and queue |
-| SMS | com.sinicable.threeib.sms | SIM selection and SmsManager queue |
-| WhatsApp Business | com.sinicable.threeib.whatsapp | Official Cloud API backend queue |
+| App | Package ID | Launcher |
+| --- | --- | --- |
+| Bale | com.sinicable.threeib.bale | In-app personal account login |
+| Rubika | com.sinicable.threeib.rubika | In-app personal account login |
+| Eitaa | com.sinicable.threeib.eitaa | In-app personal account login |
+| Telegram | com.sinicable.threeib.telegram | TDLib personal login + queue |
+| SMS | com.sinicable.threeib.sms | SIM selection + SMS queue |
+| WhatsApp Business | com.sinicable.threeib.whatsapp | Authorized Cloud API backend queue |
 
-All builds require row-level recipient consent. SMS also requires send_sms=true.
-The three Iranian personal-account builds use the bundled unofficial local GoOmni gateway and do not open installed messenger applications or use Accessibility. Each app uses its own Android private storage **and a dedicated loopback port** (Bale 38741, Rubika 38742, Eitaa 38743), allowing the three APKs to run on the same phone without binding to the same TCP port. Telegram and SMS do not use this gateway; WhatsApp still requires a separate authorized Business API backend.
+## Isolation and safety
 
-The CI workflow creates six APKs, six separately named source ZIPs, six build-info files and SHA256SUMS.txt.
+Bale, Rubika and Eitaa use bundled **unofficial** GoOmni inside their APKs without opening installed messenger applications. Their localhost gateway ports are Bale 38741, Rubika 38742, Eitaa 38743 to avoid conflicts. Live account authentication and provider delivery are unverified.
 
-## v4.0.1 stability and permission boundaries
+Recipient imports accept XLSX/CSV using name+phone or phone+opt_in; an imported phone number does not prove recipient consent. START requests explicit confirmation. The recipient editor allows manual updates to unsent rows without erasing the audit states of submitted or uncertain sends. Uncertain attempts require REVIEW to prevent blind retry. Telegram has a dedicated pending recipients editor.
 
-- Fixed the Rubika/Eitaa dedicated login screen initialization: the selected account, saved phone and per-channel delay now match the APK flavor on first launch.
-- UI version labels read BuildConfig.VERSION_NAME to avoid stale release text.
-- SEND_SMS and READ_PHONE_STATE are requested by the SMS flavor only; the other five APKs do not declare them.
-- Cleartext HTTP is enabled only for Bale, Rubika and Eitaa, for their embedded loopback gateway. Telegram, SMS and WhatsApp flavors do not enable cleartext.
-- CI validates each APK's package, launcher, version, signature and SMS permission boundary.
-- These are debug-signed arm64-v8a preview builds. APK compilation/signature validation does not establish device installation, OTP login or end-to-end delivery. WhatsApp requires an authorized Business Cloud API backend.
+SMS uses text-only messaging and can incur carrier charges. Only SMS flavor requests SEND_SMS and READ_PHONE_STATE; only Bale/Rubika/Eitaa allow local cleartext HTTP. WhatsApp Business is not a personal WhatsApp integration, requires an authorized Meta Cloud API HTTPS backend, and currently stops its activity-scoped queue when the screen closes.
+
+## CI / deliverables
+
+On 2026-11-07, run 42384192641 for SHA 01f3082b33c583091078948ff7d0ccf62cf134f2 completed successfully and published six independently installable preview APKs, six source ZIPs, channel build-info text files, and SHA256SUMS to the PR #32 GitHub release.
+
+After main integration, the same workflow is configured to build on main pushes and publish a separate main-branch GitHub Release.
+
+**Release status: preview, debug-signed, ARM64, compilation verified only.** No live device account OTP, recipient delivery, background survivability or WhatsApp backend authorization was proven. These must not be represented as tested or production-ready features. CI build tests do not send real messages.
