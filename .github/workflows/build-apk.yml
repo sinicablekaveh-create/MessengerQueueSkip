@@ -1,5 +1,7 @@
 name: Build SIX separate THREE IB APKs and sources
 on:
+  push:
+    branches: [codex/six-separate-apps-v4-20261107]
   pull_request:
   workflow_dispatch:
 
