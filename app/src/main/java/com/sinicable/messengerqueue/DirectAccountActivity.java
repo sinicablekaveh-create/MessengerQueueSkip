@@ -43,6 +43,18 @@ public final class DirectAccountActivity extends Activity {
     private TextView current,summary,footer;
     private String selected="bale";
     private String fixedProvider="";
+    // Foreground services must be started while the initiating Activity is visible.
+    private volatile boolean screenVisible;
+
+    @Override protected void onResume() {
+        super.onResume();
+        screenVisible=true;
+    }
+
+    @Override protected void onPause() {
+        screenVisible=false;
+        super.onPause();
+    }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -407,11 +419,25 @@ public final class DirectAccountActivity extends Activity {
                     throw new IllegalStateException("حساب "+LABELS[i]+" وارد نشده: "+state.optString("auth"));
                 }
             }
-            Intent service=new Intent(this,DirectQueueService.class);
-            service.setAction(DirectQueueService.ACTION_START);
-            startForegroundService(service);
-            ui.post(()->updateSummary("صف مستقل شروع شد. جزئیات در اعلان دستگاه."));
-            return "START ثبت شد؛ صف در سرویس پیش‌زمینه اجرا می‌شود.";
+            // Account checks run on the worker. Android 12+ restricts foreground
+            // service launches after the user backgrounds the app; make the
+            // actual launch on the visible Activity thread and report failures.
+            ui.post(()->{
+                if(!screenVisible || isFinishing() || isDestroyed()){
+                    updateSummary("حساب‌ها تأیید شدند؛ برنامه از صفحه خارج شد. برای شروع صف دوباره START را بزن.");
+                    return;
+                }
+                try{
+                    Intent service=new Intent(this,DirectQueueService.class);
+                    service.setAction(DirectQueueService.ACTION_START);
+                    startForegroundService(service);
+                    updateSummary("درخواست اجرای صف ثبت شد. نتیجهٔ ارسال را در اعلان و وضعیت صف بررسی کن.");
+                }catch(RuntimeException error){
+                    updateSummary("شروع صف توسط Android رد شد: "+error.getClass().getSimpleName()
+                        +" | صفحه را باز نگه دار و دوباره START را بزن.");
+                }
+            });
+            return "بررسی ورود حساب‌ها انجام شد؛ وضعیت شروع صف در بخش آمار نمایش داده می‌شود.";
         });
     }
     private void pauseQueue(){
