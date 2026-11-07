@@ -42,9 +42,12 @@ public final class DirectAccountActivity extends Activity {
     private CheckBox[] channels;
     private TextView current,summary,footer;
     private String selected="bale";
+    private String fixedProvider="";
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        String target=BuildConfig.TARGET_CHANNEL;
+        if("bale".equals(target)||"rubika".equals(target)||"eitaa".equals(target)){fixedProvider=target;selected=target;}
         // Recover uncertain submissions but NEVER send them twice automatically.
         EmbeddedGatewayService.ensureStarted(this);
         ScrollView scroll=new ScrollView(this);
@@ -62,6 +65,7 @@ public final class DirectAccountActivity extends Activity {
         LinearLayout apps=new LinearLayout(this);
         apps.setOrientation(LinearLayout.HORIZONTAL);
         column.addView(apps);
+        if(!fixedProvider.isEmpty())apps.setVisibility(android.view.View.GONE);
         for(int i=0;i<PROVIDERS.length;i++) {
             final String provider=PROVIDERS[i];
             Button b=new Button(this);
@@ -103,6 +107,13 @@ public final class DirectAccountActivity extends Activity {
             channels[i]=new CheckBox(this);
             channels[i].setText("فعال‌کردن صف "+LABELS[i]);
             channels[i].setChecked("1".equals(QueueDb.get(this,"direct_selected_"+PROVIDERS[i],"0")));
+            if(!fixedProvider.isEmpty()){
+                boolean isFixed=fixedProvider.equals(PROVIDERS[i]);
+                channels[i].setChecked(isFixed);
+                channels[i].setEnabled(false);
+                if(!isFixed)channels[i].setVisibility(android.view.View.GONE);
+                QueueDb.put(this,"direct_selected_"+PROVIDERS[i],isFixed?"1":"0");
+            }
             final int index=i;
             channels[i].setOnCheckedChangeListener((view,checked)->QueueDb.put(this,
                     "direct_selected_"+PROVIDERS[index],checked?"1":"0"));
@@ -144,6 +155,7 @@ public final class DirectAccountActivity extends Activity {
         b.setOnClickListener(v->task.run());root.addView(b);
     }
     private void select(String provider){
+        if(!fixedProvider.isEmpty()&&!fixedProvider.equals(provider))return;
         if(minutes!=null && !selected.equals(provider)) saveSelectedDelayQuiet();
         selected=provider;
         int index=0;
