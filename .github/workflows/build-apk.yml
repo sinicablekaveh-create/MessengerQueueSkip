@@ -1,7 +1,7 @@
 name: Build SIX separate THREE IB APKs and sources
 on:
   push:
-    branches: [codex/six-separate-apps-v4-20261107]
+    branches: [main, codex/six-separate-apps-v4-20261107]
   pull_request:
   workflow_dispatch:
 
@@ -153,6 +153,30 @@ jobs:
           tag_name: THREE-IB-SIX-PR-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
           name: THREE IB SIX SEPARATE APPS v${{ env.VERSION_NAME }} | DEBUG PREVIEW
           target_commitish: ${{ github.event.pull_request.head.sha }}
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.apk
+            dist/*-SOURCE-*.zip
+            dist/BUILD-INFO-*.txt
+            dist/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish main-branch six-APK release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: THREE-IB-SIX-v${{ env.VERSION_NAME }}-${{ env.BUILD_DATE }}-build${{ github.run_number }}
+          name: THREE IB SIX APKs v${{ env.VERSION_NAME }} | ${{ env.BUILD_DATE }} | build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Six independently installable ARM64 Android APK flavors and six source ZIPs.
+            These APKs are debug-signed and CI build-verified, NOT production-signed.
+            Live OTP/personal login, message delivery and end-to-end device behavior are unverified.
+            WhatsApp Business requires an authorized HTTPS Cloud API backend.
+            See BUILD-INFO files and SHA256SUMS before installation.
           draft: false
           prerelease: true
           fail_on_unmatched_files: true
