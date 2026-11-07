@@ -3,12 +3,12 @@ android {
     namespace = "com.sinicable.messengerqueue"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.sinicable.messengerqueue"
+        applicationId = "com.sinicable.threeib.personal"
         minSdk = 26
         ndk { abiFilters.add("arm64-v8a") }
         targetSdk = 35
-        versionCode = 21
-        versionName = "3.3.1"
+        versionCode = 22
+        versionName = "3.3.2"
     }
     packaging { jniLibs { useLegacyPackaging = true; keepDebugSymbols.add("**/libgoomni.so") } }
     buildTypes {

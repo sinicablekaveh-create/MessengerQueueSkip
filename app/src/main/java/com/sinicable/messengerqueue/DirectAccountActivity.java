@@ -54,7 +54,7 @@ public final class DirectAccountActivity extends Activity {
         scroll.addView(column);
         setContentView(scroll);
 
-        TextView header=label(column,"THREE IB 3.3.1 • حساب شخصی",22);
+        TextView header=label(column,"THREE IB 3.3.2 • حساب شخصی",22);
         header.setTextColor(0xFF166346);
         label(column,"ورود با شماره و کد در همین برنامه؛ بدون بازکردن بله، روبیکا یا ایتای نصب‌شده. سرویس ارتباطی غیررسمی، محلی و قابل‌وقفه است.",13);
 

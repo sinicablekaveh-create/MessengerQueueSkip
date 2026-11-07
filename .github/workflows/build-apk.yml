@@ -74,6 +74,8 @@ jobs:
           mkdir -p dist
           APK="app/build/outputs/apk/debug/app-debug.apk"
           cp "$APK" "dist/$APK_NAME"
+          ACTUAL_PACKAGE="$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+          test "$ACTUAL_PACKAGE" = "com.sinicable.threeib.personal"
           INFO="dist/BUILD_INFO.txt"
           {
             echo "THREE IB build record"
@@ -81,7 +83,7 @@ jobs:
             echo "Build date UTC: $BUILD_DATE"
             echo "Build timestamp UTC: $BUILD_TIMESTAMP"
             echo "Commit: $GITHUB_SHA"
-            echo "Package: com.sinicable.messengerqueue"
+            echo "Package: $ACTUAL_PACKAGE"
             echo "Default launcher: independent Bale, Rubika and Eitaa PERSONAL accounts with in-app OTP and native localhost GoOmni gateway"
             echo "Personal login: phone, verification code and optional 2FA inside APK; does not launch installed messenger applications."
             echo "Local gateway: ARM64 Android binary bundled from GoOmni v2.4.1 (MIT, third-party unofficial implementation)."
