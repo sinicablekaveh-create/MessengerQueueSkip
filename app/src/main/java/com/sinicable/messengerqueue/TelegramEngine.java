@@ -106,7 +106,14 @@ final class TelegramEngine {
   busy=true; info="Finding recipient "+(index+1);notifyUi();
   TdApi.ImportContacts f=new TdApi.ImportContacts();TdApi.ImportedContact c=new TdApi.ImportedContact();c.phoneNumber=internationalPhone(phones.get(index));c.firstName="MQ "+c.phoneNumber;c.lastName="";c.note=new TdApi.FormattedText("",new TdApi.TextEntity[0]);f.contacts=new TdApi.ImportedContact[]{c};
   request(f,o->{if(o instanceof TdApi.Error){error(o);return;}long[] ids=((TdApi.ImportedContacts)o).userIds;
-   if(ids.length==0||ids[0]==0){busy=false;running=false;info="Recipient unavailable on Telegram; use Skip";notifyUi();return;}
+   if(ids.length==0||ids[0]==0){
+    // A confirmed unavailable recipient is not a send attempt. Skip this row
+    // rather than halting the entire opted-in queue; persist progress first.
+    busy=false;index++;next=System.currentTimeMillis()+delay;save();
+    info="Recipient unavailable on Telegram; skipped "+index+" / "+phones.size();notifyUi();
+    if(running)h.postDelayed(this::step,delay);
+    return;
+   }
    request(new TdApi.CreatePrivateChat(ids[0],false),chat->{if(chat instanceof TdApi.Error){error(chat);return;}send(((TdApi.Chat)chat).id);});
   });
  }
