@@ -165,6 +165,11 @@ public final class DirectAccountActivity extends Activity {
         phone.setText(previous);
         code.setText("");password.setText("");
         minutes.setText(String.valueOf(QueueDb.delayMinutes(this,provider)));
+        // Re-check persisted account sessions instead of showing OTP instructions as proof of login.
+        if(footer!=null){
+            if(instance(provider).isEmpty())footer.setText("حساب "+LABELS[index]+" هنوز متصل نشده؛ ابتدا شماره و کد ورود را ثبت کن.");
+            else refreshAccount();
+        }
     }
     private void saveSelectedDelayQuiet(){
         try{
@@ -280,8 +285,8 @@ public final class DirectAccountActivity extends Activity {
                 "/devices/"+GatewayClient.alias(provider)+"/login/code",body,
                 GatewayClient.alias(provider),instance(provider),null);
             if(!reply.success())throw new IllegalStateException(reply.summary());
-            return "نتیجهٔ ورود: "+account(provider).optString("auth","نامشخص")
-                +" | در صورت درخواست، رمز دومرحله‌ای را ثبت کن.";
+            JSONObject verified=account(provider);
+            return loginResult(provider,verified);
         });
     }
 
@@ -300,7 +305,7 @@ public final class DirectAccountActivity extends Activity {
                     "/devices/"+GatewayClient.alias(provider)+"/login/password",
                     payload,GatewayClient.alias(provider),instance(provider),null);
             if(!reply.success())throw new IllegalStateException(reply.summary());
-            return "وضعیت ورود: "+account(provider).optString("auth","نامشخص");
+            return loginResult(provider,account(provider));
         });
     }
 
@@ -309,10 +314,18 @@ public final class DirectAccountActivity extends Activity {
         network("خواندن وضعیت حساب",()->{
             waitForGateway();
             JSONObject state=account(provider);
-            return provider+" | auth="+state.optString("auth","?")+
-                " | transport="+state.optString("transport","?")+
-                " | recovery="+state.optString("recovery","?");
+            return loginResult(provider,state);
         });
+    }
+
+    /** Only a connected and authenticated gateway session is ready to send. */
+    private static String loginResult(String provider,JSONObject state){
+        String auth=state.optString("auth","نامشخص");
+        String transport=state.optString("transport","نامشخص");
+        boolean ready="authenticated".equals(auth)&&"connected".equals(transport);
+        return (ready?"✅ حساب آمادهٔ ارسال: ":"⚠️ حساب هنوز آمادهٔ ارسال نیست: ")
+                +provider+" | auth="+auth+" | transport="+transport
+                +" | recovery="+state.optString("recovery","نامشخص");
     }
 
     private void pickContacts(){
