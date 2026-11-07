@@ -159,7 +159,7 @@ public class QueueKeeperService extends Service {
     }
 
     private Notification buildNotification(){
-        Intent open=new Intent(this,MainActivity.class);
+        Intent open=new Intent(this,ChannelLauncherActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_NEW_TASK);
         int pflags=PendingIntent.FLAG_UPDATE_CURRENT;
         if(Build.VERSION.SDK_INT>=23)pflags|=PendingIntent.FLAG_IMMUTABLE;
