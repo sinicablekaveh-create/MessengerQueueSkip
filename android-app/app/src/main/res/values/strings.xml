@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">THREE IB</string>
+    <string name="accessibility_description">Automates user-approved message delivery in Bale, Eitaa and Rubika. Enable only while using THREE IB.</string>
+</resources>
