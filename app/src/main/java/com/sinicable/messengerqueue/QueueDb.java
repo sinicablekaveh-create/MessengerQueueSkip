@@ -138,6 +138,112 @@ final class QueueDb {
         return added+reactivated;
     }
 
+
+    /** Manual recipient editing is allowed only for unsent rows while all queues are idle.
+     * Submitted, failed, uncertain or in-flight rows remain immutable audit records.
+     */
+    static synchronized boolean editorIdle(Context c) {
+        if ("1".equals(get(c,"direct_running","0"))
+                || "1".equals(get(c,"desired_running","0"))
+                || "1".equals(get(c,"whatsapp_running","0"))) return false;
+        JSONArray rows=items(c);
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row==null) continue;
+            for (String channel:new String[]{"bale","rubika","eitaa","sms","whatsapp"})
+                if ("in_flight".equals(row.optString(channel,""))) return false;
+        }
+        return true;
+    }
+
+    private static boolean editorUnsent(JSONObject row) {
+        if (row==null) return false;
+        for (String channel:new String[]{"bale","rubika","eitaa","sms","whatsapp"}) {
+            String status=row.optString(channel,"blocked");
+            if (!"pending".equals(status) && !"blocked".equals(status)
+                    && !"cleared".equals(status)) return false;
+        }
+        return true;
+    }
+
+    static synchronized boolean editorEditable(Context c,String rowId) {
+        if (!editorIdle(c)) return false;
+        JSONArray rows=items(c);
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row!=null && rowId.equals(row.optString("id"))) return editorUnsent(row);
+        }
+        return false;
+    }
+
+    static synchronized String editorAdd(Context c,String contactName,String rawPhone,boolean sendSms) {
+        if (!editorIdle(c)) return "ابتدا همهٔ صف‌ها را متوقف کنید.";
+        String phone=RecipientImportParser.phone(rawPhone);
+        if (phone.isEmpty()) return "شماره تماس معتبر نیست.";
+        JSONArray rows=items(c);
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row!=null && phone.equals(row.optString("phone"))) return "این شماره قبلاً ثبت شده است.";
+        }
+        RecipientImportParser.Result result=new RecipientImportParser.Result();
+        result.recipients.add(new RecipientImportParser.Recipient(
+                contactName,phone,true,"manual-user-confirmed-at-entry",sendSms,""));
+        return append(c,result)==1?"مخاطب با رضایت ثبت شد.":"ذخیرهٔ مخاطب ناموفق بود.";
+    }
+
+    static synchronized String editorEdit(Context c,String rowId,String contactName,
+                                           String rawPhone,boolean sendSms) {
+        if (!editorIdle(c)) return "ابتدا همهٔ صف‌ها را متوقف کنید.";
+        String phone=RecipientImportParser.phone(rawPhone);
+        if (phone.isEmpty()) return "شماره تماس معتبر نیست.";
+        JSONArray rows=items(c);
+        JSONObject target=null;
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row==null) continue;
+            if (phone.equals(row.optString("phone")) && !rowId.equals(row.optString("id")))
+                return "شمارهٔ تکراری مجاز نیست.";
+            if (rowId.equals(row.optString("id"))) target=row;
+        }
+        if (!editorUnsent(target)) return "این ردیف سابقهٔ ارسال دارد؛ قابل ویرایش نیست.";
+        try {
+            boolean changedPhone=!phone.equals(target.optString("phone"));
+            target.put("name",contactName.trim().isEmpty()?"بدون نام":contactName.trim());
+            target.put("phone",phone);
+            target.put("opt_in",true);
+            target.put("opt_in_source","manual-user-confirmed-at-edit");
+            target.put("send_sms",sendSms);
+            if (changedPhone) {
+                for (String channel:new String[]{"bale","rubika","eitaa","whatsapp"})
+                    target.put(channel,"pending");
+                target.put("sms",sendSms?"pending":"blocked");
+            } else {
+                String sms=target.optString("sms");
+                if ("blocked".equals(sms) && sendSms) target.put("sms","pending");
+                if ("pending".equals(sms) && !sendSms) target.put("sms","blocked");
+            }
+            return save(c,rows)?"تغییرات ذخیره شد.":"ذخیرهٔ تغییرات ناموفق بود.";
+        } catch(Exception e) {
+            return "ویرایش مخاطب ناموفق بود.";
+        }
+    }
+
+    static synchronized String editorDelete(Context c,String rowId) {
+        if (!editorIdle(c)) return "ابتدا همهٔ صف‌ها را متوقف کنید.";
+        JSONArray rows=items(c), kept=new JSONArray();
+        boolean removed=false;
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row==null) continue;
+            if (rowId.equals(row.optString("id"))) {
+                if (!editorUnsent(row)) return "این ردیف سابقهٔ ارسال دارد؛ برای حفظ گزارش قابل حذف نیست.";
+                removed=true;
+            } else kept.put(row);
+        }
+        if (!removed) return "مخاطب پیدا نشد.";
+        return save(c,kept)?"مخاطب ارسال‌نشده حذف شد.":"حذف مخاطب ناموفق بود.";
+    }
+
     /** Interrupted attempts are never blindly retried because send may already have happened. */
     static synchronized int recoverInterrupted(Context c) {
         JSONArray a=items(c);
