@@ -6,6 +6,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -73,18 +75,45 @@ final class QueueDb {
 
     static synchronized int append(Context c,RecipientImportParser.Result parsed) {
         JSONArray a=items(c);
-        Set<String> known=new HashSet<>();
+        Map<String,JSONObject> known=new HashMap<>();
         for(int i=0;i<a.length();i++) {
             JSONObject v=a.optJSONObject(i);
-            if(v!=null)known.add(v.optString("phone"));
+            if(v!=null)known.put(v.optString("phone"),v);
         }
-        int added=0,blocked=0;
+        int added=0,reactivated=0,blocked=0;
         for(RecipientImportParser.Recipient r:parsed.recipients) {
-            if(!known.add(r.phone))continue;
+            JSONObject previous=known.get(r.phone);
+            if(previous!=null) {
+                try {
+                    if(!previous.has("name")||previous.optString("name").trim().isEmpty())
+                        previous.put("name",r.name);
+                    boolean restored=false;
+                    if(r.optIn&&!previous.optBoolean("opt_in",false)) {
+                        previous.put("opt_in",true);
+                        previous.put("opt_in_source",r.optInSource);
+                        if("blocked".equals(previous.optString("status")))previous.put("status","pending");
+                        for(String app:APPS)if("blocked".equals(previous.optString(key(app))))
+                            previous.put(key(app),"pending");
+                        if("blocked".equals(previous.optString("whatsapp")))
+                            previous.put("whatsapp","pending");
+                        restored=true;
+                    }
+                    if(r.sendSms&&!previous.optBoolean("send_sms",false)) {
+                        previous.put("send_sms",true);
+                        if(previous.optBoolean("opt_in",false)&&"blocked".equals(previous.optString("sms")))
+                            previous.put("sms","pending");
+                        restored=true;
+                    }
+                    if(restored)reactivated++;
+                    // Never reset submitted/review/cleared jobs to pending.
+                }catch(Exception ignored){}
+                continue;
+            }
             JSONObject v=new JSONObject();
             try {
                 v.put("id",UUID.randomUUID().toString());
                 v.put("phone",r.phone);
+                v.put("name",r.name);
                 v.put("opt_in",r.optIn);
                 v.put("opt_in_source",r.optInSource);
                 v.put("send_sms",r.sendSms);
@@ -99,13 +128,14 @@ final class QueueDb {
                 v.put("sms_started_at",0L);
             } catch(Exception ignored){}
             a.put(v);
+            known.put(r.phone,v);
             added++;
             if(!r.optIn)blocked++;
         }
         save(c,a);
-        log(c,"Imported "+added+" unique rows; "+blocked+" blocked without row opt-in; parser invalid="+
+        log(c,"Imported "+added+" new; reactivated "+reactivated+" blocked rows; "+blocked+" new blocked; parser invalid="+
                 parsed.invalidRows+", duplicates="+parsed.duplicateRows);
-        return added;
+        return added+reactivated;
     }
 
     /** Interrupted attempts are never blindly retried because send may already have happened. */

@@ -72,7 +72,7 @@ public class TelegramActivity extends Activity {
             engine.login(value);
         });
 
-        button(root, "IMPORT EXCEL / CSV (phone,opt_in)", () -> {
+        button(root, "IMPORT EXCEL / CSV (name,phone)", () -> {
             if (engine.running || engine.busy) {
                 toast("Pause the Telegram queue before changing its recipients.");
                 return;
@@ -145,7 +145,7 @@ public class TelegramActivity extends Activity {
         });
 
         TextView note = new TextView(this);
-        note.setText("Telegram uses the official TDLib client library. API credentials are encrypted with Android Keystore. Login may require your phone number, OTP, email confirmation, or 2-step password. Import requires phone and opt_in headers; only rows with opt_in=true enter this queue. Telegram may not resolve every phone number. Server accepted is not a read receipt. The Telegram queue has separate START / PAUSE controls from the Bale, Rubika, Eitaa and SMS queues.");
+        note.setText("Telegram uses the official TDLib client library. API credentials are encrypted with Android Keystore. Login may require your phone number, OTP, email confirmation, or 2-step password. Two-column name/phone files are supported; confirm recipient consent at START. Legacy opt_in columns also work. Telegram may not resolve every phone number. Server accepted is not a read receipt. The Telegram queue has separate START / PAUSE controls from the Bale, Rubika, Eitaa and SMS queues.");
         root.addView(note);
         engine.observer = this::refresh;
         refresh();

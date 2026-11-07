@@ -88,7 +88,7 @@ public final class DirectAccountActivity extends Activity {
 
         label(column,"۲. فهرست گیرندگان و محتوا",18);
         button(column,"انتخاب فایل Excel / CSV مخاطبان",this::pickContacts);
-        label(column,"فقط ردیف‌هایی که در فایل opt_in=true دارند مجازند. شماره‌ها و وضعیت‌ها در حافظهٔ خصوصی برنامه ذخیره می‌شوند.",12);
+        label(column,"اکسل فقط با نام و شماره تماس پذیرفته می‌شود. نام خالی: بدون نام. برای START رضایت گیرندگان را تأیید کنید.",12);
         message=field(column,"متن پیام",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setMinLines(3);
         message.setText(QueueDb.get(this,"direct_text",""));

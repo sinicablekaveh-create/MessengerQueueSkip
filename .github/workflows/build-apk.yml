@@ -57,6 +57,9 @@ jobs:
               f.write(f"BUILD_TIMESTAMP={now:%Y-%m-%dT%H:%M:%SZ}\n")
           PY
 
+      - name: Verify two-column and legacy recipient imports
+        run: bash tools/test-recipient-import.sh
+
       - name: Compile six independent APK flavors
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 
