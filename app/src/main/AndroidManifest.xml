@@ -6,33 +6,69 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.SEND_SMS"/>
+    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+
     <application
         android:extractNativeLibs="true"
         android:allowBackup="false"
-        android:label="THREE IB • Personal"
+        android:label="${appLabel}"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="true">
-        <activity android:name=".DirectAccountActivity"
+
+        <activity
+            android:name=".ChannelLauncherActivity"
             android:exported="true"
-            android:label="THREE IB">
+            android:label="${appLabel}">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <service android:name=".EmbeddedGatewayService"
+
+        <activity android:name=".DirectAccountActivity" android:exported="false"/>
+        <activity android:name=".TelegramActivity" android:exported="false"/>
+        <activity android:name=".SmsOnlyActivity" android:exported="false"/>
+        <activity android:name=".WhatsAppCloudActivity" android:exported="false"/>
+
+        <service
+            android:name=".EmbeddedGatewayService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-controlled local account gateway; never opens installed messengers"/>
         </service>
-        <service android:name=".DirectQueueService"
+
+        <service
+            android:name=".DirectQueueService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-initiated consent-only message queue with visible pause notification"/>
+                android:value="User-initiated consent-only personal-account queue"/>
         </service>
+
+        <service
+            android:name=".TelegramQueueService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started Telegram personal-account queue with visible controls"/>
+        </service>
+
+        <service
+            android:name=".QueueKeeperService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started SMS queue with visible pause and stop controls"/>
+        </service>
+
+        <receiver
+            android:name=".SmsStatusReceiver"
+            android:exported="false"/>
     </application>
 </manifest>
