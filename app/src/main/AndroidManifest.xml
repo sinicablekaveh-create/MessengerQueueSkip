@@ -50,6 +50,15 @@
         </service>
 
         <service
+            android:name=".WhatsAppQueueService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-initiated consent-only WhatsApp Business HTTPS queue"/>
+        </service>
+
+        <service
             android:name=".TelegramQueueService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
