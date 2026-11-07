@@ -178,8 +178,51 @@ public class TelegramActivity extends Activity {
         configState.setText(TelegramConfigStore.hasCredentials(this)
                 ? "API credentials: saved encrypted on this device"
                 : "API credentials: not configured");
-        submit.setEnabled(engine.client != null && !engine.ready);
-        login.setVisibility(engine.ready ? View.GONE : View.VISIBLE);
+        // TDLib supplies the next required authorization step. Only show the
+        // matching input; do not disguise phone numbers or OTPs as passwords.
+        String step = engine.auth;
+        boolean inputRequired = true;
+        int kind = android.text.InputType.TYPE_CLASS_TEXT;
+        String hint = "Waiting for Telegram authentication";
+        switch (step) {
+            case "WaitPhoneNumber":
+                hint = "Phone number (e.g. +989121234567)";
+                kind = android.text.InputType.TYPE_CLASS_PHONE;
+                break;
+            case "WaitCode":
+                hint = "Code received from Telegram";
+                kind = android.text.InputType.TYPE_CLASS_NUMBER;
+                break;
+            case "WaitPassword":
+                hint = "Telegram two-step verification password";
+                kind = android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;
+                break;
+            case "WaitEmailAddress":
+                hint = "Telegram login email address";
+                kind = android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS;
+                break;
+            case "WaitEmailCode":
+                hint = "Code received by email";
+                kind = android.text.InputType.TYPE_CLASS_TEXT;
+                break;
+            default:
+                inputRequired = false;
+                if ("WaitOtherDeviceConfirmation".equals(step))
+                    hint = "Confirm login on your other Telegram device";
+                else if ("WaitRegistration".equals(step))
+                    hint = "Telegram account registration is required";
+                break;
+        }
+        if (login.getInputType() != kind) {
+            login.setInputType(kind);
+            login.setText("");
+        }
+        login.setHint(hint);
+        login.setVisibility(engine.ready || !inputRequired ? View.GONE : View.VISIBLE);
+        submit.setVisibility(engine.ready || !inputRequired ? View.GONE : View.VISIBLE);
+        submit.setEnabled(engine.client != null && inputRequired);
     }
 
     @Override protected void onDestroy() {
