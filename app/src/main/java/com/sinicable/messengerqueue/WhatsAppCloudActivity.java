@@ -61,7 +61,7 @@ public final class WhatsAppCloudActivity extends Activity {
         title.setTextSize(22);
         root.addView(title);
         TextView note = new TextView(this);
-        note.setText("Official WhatsApp Business Cloud API only. Requires an authorized Meta Business account, HTTPS backend and server token. Only rows with opt_in=true can be queued. Free-form text may be used only within the permitted customer-service window; approved templates are not implemented. The queue is saved, but sending stops when this screen closes. Never retry REVIEW rows without checking server/Meta logs.");
+        note.setText("Official WhatsApp Business Cloud API only. Requires an authorized Meta Business account, HTTPS backend and server token. Two-column name/phone files are supported; confirm recipient consent at START. Free-form text may be used only within the permitted customer-service window; approved templates are not implemented. The queue is saved, but sending stops when this screen closes. Never retry REVIEW rows without checking server/Meta logs.");
         root.addView(note);
 
         endpoint = field(root, "HTTPS backend ending /v1/whatsapp/messages",
@@ -280,7 +280,7 @@ public final class WhatsAppCloudActivity extends Activity {
                 handler.post(() -> refreshStatus("Shared contacts: " + added
                         + " new unique rows; " + blocked + " without opt-in blocked."));
             } catch (Exception error) {
-                handler.post(() -> toast("Import failed. Use Excel/CSV with phone,opt_in."));
+                handler.post(() -> toast("Import failed. Use Excel/CSV with name,phone or phone,opt_in."));
             }
         }, "whatsapp-import").start();
     }

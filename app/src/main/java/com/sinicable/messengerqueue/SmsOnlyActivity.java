@@ -47,7 +47,7 @@ public final class SmsOnlyActivity extends Activity {
         setContentView(scroll);
 
         text(root, "THREE IB "+BuildConfig.VERSION_NAME+" • SMS SIM", 23);
-        text(root, "اپ مستقل SMS. فقط ردیف‌های opt_in=true و send_sms=true وارد صف می‌شوند. هزینه پیامک طبق اپراتور است.", 13);
+        text(root, "اپ مستقل SMS. فایل اکسل دو ستونی نام و شماره تماس هم پذیرفته می‌شود؛ در START رضایت واقعی گیرندگان را تأیید کنید. هزینه پیامک طبق اپراتور است.", 13);
 
         button(root, "انتخاب Excel / CSV مخاطبان", this::pickRecipients);
         button(root, "انتخاب سیم‌کارت", this::chooseSim);
@@ -136,7 +136,7 @@ public final class SmsOnlyActivity extends Activity {
                 }
                 RecipientImportParser.Result parsed;
                 try (InputStream input = getContentResolver().openInputStream(uri)) {
-                    parsed = RecipientImportParser.read(input, name);
+                    parsed = RecipientImportParser.read(input, name, true);
                 }
                 int added = QueueDb.append(getApplicationContext(), parsed);
                 runOnUiThread(() -> refresh(added + " ردیف غیرتکراری وارد شد."));
