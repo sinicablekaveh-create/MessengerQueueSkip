@@ -72,6 +72,7 @@ public class TelegramActivity extends Activity {
             engine.login(value);
         });
 
+        button(root, "مدیریت مخاطبان • ایجاد، ویرایش، حذف", () -> startActivity(new Intent(this,TelegramRecipientsActivity.class)));
         button(root, "IMPORT EXCEL / CSV (name,phone)", () -> {
             if (engine.running || engine.busy) {
                 toast("Pause the Telegram queue before changing its recipients.");
@@ -149,6 +150,7 @@ public class TelegramActivity extends Activity {
         root.addView(note);
         engine.observer = this::refresh;
         refresh();
+        AppStyle.decorate(this,getWindow().getDecorView());
     }
 
     private EditText edit(LinearLayout root, String hint) {
