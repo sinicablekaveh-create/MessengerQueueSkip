@@ -55,7 +55,18 @@ public final class EmbeddedGatewayService extends Service {
         return "";
     }
 
-    static String address() { return "http://127.0.0.1:38741"; }
+    // Each independently installed flavor owns a distinct loopback port.
+    // Android app sandboxes isolate files, but TCP ports share the device-wide network namespace.
+    static int port() {
+        switch (BuildConfig.TARGET_CHANNEL) {
+            case "bale": return 38741;
+            case "rubika": return 38742;
+            case "eitaa": return 38743;
+            default: throw new IllegalStateException("This flavor has no embedded personal gateway");
+        }
+    }
+
+    static String address() { return "http://127.0.0.1:" + port(); }
 
     static void ensureStarted(Context context) {
         Intent intent = new Intent(context, EmbeddedGatewayService.class);
@@ -130,7 +141,7 @@ public final class EmbeddedGatewayService extends Service {
         env.put("TMPDIR", getCacheDir().getAbsolutePath());
         env.put("APP_UI_ENABLED", "false");
         env.put("APP_HOST", "127.0.0.1");
-        env.put("APP_PORT", "38741");
+        env.put("APP_PORT", String.valueOf(port()));
         env.put("EITAA_ENABLED", "true");
         env.put("RUBIKA_ENABLED", "true");
         env.put("APP_DATABASE", new File(dir,"goomni.db").getAbsolutePath());

@@ -60,8 +60,15 @@ jobs:
       - name: Verify two-column and legacy recipient imports
         run: bash tools/test-recipient-import.sh
 
-      - name: Compile six independent APK flavors
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Generate and compile six standalone Android projects
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/make_standalone_sources.py
+          for channel in bale rubika eitaa telegram sms whatsapp; do
+            gradle -p "standalone/$channel" wrapper --gradle-version 8.9
+            gradle -p "standalone/$channel" :app:assembleDebug --no-daemon --stacktrace
+          done
 
       - name: Verify, name and package six APKs plus six source ZIPs
         shell: bash
@@ -78,7 +85,7 @@ jobs:
 
           for channel in bale rubika eitaa telegram sms whatsapp; do
             upper="$(echo "$channel" | tr '[:lower:]' '[:upper:]')"
-            input="app/build/outputs/apk/$channel/debug/app-$channel-debug.apk"
+            input="standalone/$channel/app/build/outputs/apk/debug/app-debug.apk"
             test -s "$input"
             apk="dist/THREE-IB-$upper-v$VERSION_NAME-$BUILD_DATE.apk"
             src="dist/THREE-IB-$upper-SOURCE-v$VERSION_NAME-$BUILD_DATE.zip"
@@ -137,9 +144,10 @@ jobs:
               echo "Recipient policy: per-row opt_in=true required; SMS additionally requires send_sms=true."
             } > "$info"
 
-            git archive --format=zip --prefix="THREE-IB-$upper-v$VERSION_NAME-$BUILD_DATE/" HEAD -o "$src"
-            task_suffix="${channel^}"
-            printf 'TARGET_CHANNEL=%s\nAPPLICATION_ID=%s\nBUILD_TASK=:app:assemble%sDebug\n' "$channel" "$actual" "$task_suffix" > dist/TARGET_CHANNEL.txt
+            project="standalone/$channel"
+            rm -rf "$project/app/build" "$project/.gradle"
+            (cd "$project" && zip -qr "$GITHUB_WORKSPACE/$src" .)
+            printf 'TARGET_CHANNEL=%s\nAPPLICATION_ID=%s\nBUILD_TASK=:app:assembleDebug\nSOURCE_MODE=standalone-fixed-channel\n' "$channel" "$actual" > dist/TARGET_CHANNEL.txt
             zip -q -j "$src" dist/TARGET_CHANNEL.txt "$info"
           done
 

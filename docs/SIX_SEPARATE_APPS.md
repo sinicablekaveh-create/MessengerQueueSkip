@@ -12,7 +12,7 @@ This branch builds six independently installable APKs from one source tree.
 | WhatsApp Business | com.sinicable.threeib.whatsapp | Official Cloud API backend queue |
 
 All builds require row-level recipient consent. SMS also requires send_sms=true.
-The three Iranian personal-account builds use the bundled unofficial local GoOmni gateway and do not open installed messenger applications or use Accessibility.
+The three Iranian personal-account builds use the bundled unofficial local GoOmni gateway and do not open installed messenger applications or use Accessibility. Each app uses its own Android private storage **and a dedicated loopback port** (Bale 38741, Rubika 38742, Eitaa 38743), allowing the three APKs to run on the same phone without binding to the same TCP port. Telegram and SMS do not use this gateway; WhatsApp still requires a separate authorized Business API backend.
 
 The CI workflow creates six APKs, six separately named source ZIPs, six build-info files and SHA256SUMS.txt.
 
