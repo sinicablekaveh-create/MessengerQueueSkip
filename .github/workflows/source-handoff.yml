@@ -20,10 +20,10 @@ jobs:
         run: |
           git archive --format=zip --prefix=MessengerQueueSkip/ HEAD -o THREE-IB-MessengerQueueSkip-SOURCE.zip
           unzip -t THREE-IB-MessengerQueueSkip-SOURCE.zip >/dev/null
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: THREE-IB-MessengerQueueSkip-SOURCE
-          path: THREE-IB-MessengerQueueSkip-SOURCE.zip
-          if-no-files-found: error
-          retention-days: 30
+      - name: Verify source archive (six downloadable source ZIPs are published by build-apk.yml)
+        run: |
+          test -s THREE-IB-MessengerQueueSkip-SOURCE.zip
+          unzip -t THREE-IB-MessengerQueueSkip-SOURCE.zip >/dev/null
+          echo "Source archive verified. Build-apk.yml publishes the six channel source ZIPs to GitHub Releases."
+        # Avoid actions/upload-artifact: this repository's Actions storage quota
+        # currently rejects artifact uploads. The releases remain downloadable.

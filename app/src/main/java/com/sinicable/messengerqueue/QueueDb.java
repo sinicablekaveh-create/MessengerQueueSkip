@@ -356,6 +356,18 @@ final class QueueDb {
         return save(c,a);
     }
 
+    /** CAS completion: a late HTTP response cannot overwrite REVIEW after CLEAR. */
+    static synchronized boolean whatsappFinishIfInFlight(Context c, int index, String outcome) {
+        JSONArray a = items(c);
+        JSONObject row = a.optJSONObject(index);
+        if (row == null || !"in_flight".equals(row.optString("whatsapp"))) return false;
+        if (!"submitted".equals(outcome) && !"failed".equals(outcome)
+                && !"review".equals(outcome)) return false;
+        try { row.put("whatsapp", outcome); }
+        catch (Exception ignored) { return false; }
+        return save(c, a);
+    }
+
     /** Remove only pending WhatsApp work, preserving sent/review records and shared rows. */
     static synchronized void whatsappClear(Context c) {
         JSONArray a=items(c);

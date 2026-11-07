@@ -32,7 +32,8 @@ import java.nio.charset.StandardCharsets;
  * User-controlled WhatsApp Business Cloud API queue.
  * Shared Excel rows and per-row states survive Activity recreation/process death.
  * Attempts with uncertain outcomes require manual review, never automatic retry.
- * The network runner is Activity-scoped: reopening requires pressing START again.
+ * A foreground Service owns the queue, so leaving this screen does not stop it.
+ * The backend token is never persisted; Android process death pauses safely.
  */
 public final class WhatsAppCloudActivity extends Activity {
     private static final int PICK_RECIPIENTS = 801;
@@ -43,13 +44,13 @@ public final class WhatsAppCloudActivity extends Activity {
     private EditText delayMinutes;
     private TextView status;
     private CheckBox confirmConsent;
-    private boolean running;
-    private int generation;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        int reviewCount = QueueDb.whatsappRecoverInterrupted(this);
-        QueueDb.put(this,"whatsapp_running","0");
+        int reviewCount = WhatsAppQueueService.isActive()
+                ? 0 : QueueDb.whatsappRecoverInterrupted(this);
+        if (!WhatsAppQueueService.isActive())
+            QueueDb.put(this,"whatsapp_running","0");
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -62,7 +63,7 @@ public final class WhatsAppCloudActivity extends Activity {
         title.setTextSize(22);
         root.addView(title);
         TextView note = new TextView(this);
-        note.setText("Official WhatsApp Business Cloud API only. Requires an authorized Meta Business account, HTTPS backend and server token. Two-column name/phone files are supported; confirm recipient consent at START. Free-form text may be used only within the permitted customer-service window; approved templates are not implemented. The queue is saved, but sending stops when this screen closes. Never retry REVIEW rows without checking server/Meta logs.");
+        note.setText("Official WhatsApp Business Cloud API only. Requires an authorized Meta Business account, HTTPS backend and server token. Two-column name/phone files are supported; confirm recipient consent at START. Free-form text may be used only within the permitted customer-service window; approved templates are not implemented. The foreground queue continues when this screen closes, while Android allows its service to run. Process death pauses safely and requires START again; the token is never saved. Never retry REVIEW rows without checking server/Meta logs.");
         root.addView(note);
 
         endpoint = field(root, "HTTPS backend ending /v1/whatsapp/messages",
@@ -85,18 +86,16 @@ public final class WhatsAppCloudActivity extends Activity {
         root.addView(status);
         button(root, "START AUTOMATIC • WHATSAPP", this::startQueue);
         button(root, "PAUSE / STOP WHATSAPP", () -> {
-            running = false;
-            QueueDb.put(this,"whatsapp_running","0");
-            generation++;
-            refreshStatus("Paused. Unsent rows remain pending; any active request can still complete.");
+            startService(new Intent(this, WhatsAppQueueService.class)
+                    .setAction(WhatsAppQueueService.ACTION_PAUSE));
+            refreshStatus("Pause requested. Unsent rows stay pending; active requests can still complete.");
         });
         button(root, "CLEAR PENDING WHATSAPP (keep shared contacts / audit)", () -> {
-            running = false;
-            QueueDb.put(this,"whatsapp_running","0");
-            generation++;
+            startService(new Intent(this, WhatsAppQueueService.class)
+                    .setAction(WhatsAppQueueService.ACTION_PAUSE));
             QueueDb.whatsappClear(this);
             QueueDb.due(this, "WhatsApp", 0L);
-            refreshStatus("Unsent WhatsApp rows cleared. REVIEW and SUBMITTED retained.");
+            refreshStatus("Unsent rows cleared. In-flight or uncertain attempts require REVIEW.");
         });
         refreshStatus(reviewCount == 0 ? "Ready" : reviewCount + " interrupted WhatsApp attempt(s) require REVIEW.");
         AppStyle.decorate(this,getWindow().getDecorView());
@@ -125,11 +124,12 @@ public final class WhatsAppCloudActivity extends Activity {
                 + " • Review: " + QueueDb.whatsappCount(this, "review")
                 + " • Failed: " + QueueDb.whatsappCount(this, "failed")
                 + " • Cleared: " + QueueDb.whatsappCount(this, "cleared")
+                + "\nQueue: " + QueueDb.get(this, "whatsapp_service_status", "Idle")
                 + "\nSUBMITTED means accepted by the backend, not delivered.");
     }
 
     private void pickRecipients() {
-        if (running) {
+        if (WhatsAppQueueService.isActive()) {
             toast("Pause sending before importing recipients.");
             return;
         }
@@ -140,7 +140,10 @@ public final class WhatsAppCloudActivity extends Activity {
     }
 
     private void startQueue() {
-        if (running) return;
+        if (WhatsAppQueueService.isActive()) {
+            refreshStatus("Queue is already running in the foreground.");
+            return;
+        }
         String url = endpoint.getText().toString().trim();
         String token = serviceToken.getText().toString().trim();
         String text = message.getText().toString().trim();
@@ -150,119 +153,30 @@ public final class WhatsAppCloudActivity extends Activity {
         if (!url.startsWith("https://") || !url.endsWith("/v1/whatsapp/messages")
                 || token.isEmpty() || text.isEmpty() || minutes < 1 || minutes > 1440
                 || !confirmConsent.isChecked()) {
-            toast("Enter the HTTPS endpoint, token, text, 1–1440 minutes and confirm consent.");
+            toast("Enter an authorized HTTPS endpoint, token, text, delay, and confirm recipient consent.");
             return;
         }
         if (QueueDb.whatsappCount(this, "in_flight") != 0) {
-            refreshStatus("An earlier request is still in flight. Wait for its outcome.");
+            refreshStatus("Previous attempt still in flight; review it before starting.");
             return;
         }
         if (QueueDb.whatsappCount(this, "pending") == 0) {
-            refreshStatus("No opted-in WhatsApp recipients are pending.");
+            refreshStatus("No consent-confirmed recipients pending.");
             return;
         }
         QueueDb.put(this, "delay_whatsapp", String.valueOf(minutes));
-        running = true;
-        QueueDb.put(this,"whatsapp_running","1");
-        generation++;
-        dispatch(url, token, text, minutes * 60_000L, generation);
-    }
-
-    private static String toE164(String phone) {
-        if (phone.matches("^\\+[1-9][0-9]{7,14}$")) return phone;
-        if (phone.matches("^09[0-9]{9}$")) return "+98" + phone.substring(1);
-        return "";
-    }
-
-    private void dispatch(String url, String token, String text, long delayMillis, int run) {
-        if (!running || run != generation) return;
-        int rowIndex = QueueDb.next(this, "WhatsApp");
-        if (rowIndex < 0) {
-            running = false;
-            QueueDb.put(this,"whatsapp_running","0");
-            refreshStatus("No pending WhatsApp rows remain.");
-            return;
+        Intent service = new Intent(this, WhatsAppQueueService.class)
+                .setAction(WhatsAppQueueService.ACTION_START)
+                .putExtra(WhatsAppQueueService.EXTRA_ENDPOINT, url)
+                .putExtra(WhatsAppQueueService.EXTRA_TOKEN, token)
+                .putExtra(WhatsAppQueueService.EXTRA_TEXT, text)
+                .putExtra(WhatsAppQueueService.EXTRA_INTERVAL, minutes);
+        try {
+            startForegroundService(service);
+            refreshStatus("Starting foreground queue. See notification for PAUSE.");
+        } catch (RuntimeException failure) {
+            refreshStatus("Android denied service start: " + failure.getClass().getSimpleName());
         }
-        long wait = QueueDb.due(this, "WhatsApp") - System.currentTimeMillis();
-        if (wait > 0) {
-            refreshStatus("Waiting until the next permitted send interval.");
-            handler.postDelayed(() -> dispatch(url, token, text, delayMillis, run), wait);
-            return;
-        }
-        String recipient = toE164(QueueDb.phone(this, rowIndex));
-        if (recipient.isEmpty()) {
-            QueueDb.status(this, rowIndex, "WhatsApp", "failed");
-            refreshStatus("Invalid international phone format; row marked FAILED.");
-            handler.post(() -> dispatch(url, token, text, delayMillis, run));
-            return;
-        }
-        // Do not send unless the durable IN_FLIGHT write has succeeded.
-        if (!QueueDb.whatsappMarkInFlight(this, rowIndex)) {
-            running = false;
-            QueueDb.put(this,"whatsapp_running","0");
-            refreshStatus("Cannot persist IN_FLIGHT. No request was sent.");
-            return;
-        }
-        refreshStatus("Submitting one opted-in recipient...");
-        final android.content.Context app = getApplicationContext();
-        new Thread(() -> {
-            String outcome = "review";
-            HttpURLConnection connection = null;
-            try {
-                connection = (HttpURLConnection) new URL(url).openConnection();
-                connection.setInstanceFollowRedirects(false);
-                connection.setRequestMethod("POST");
-                connection.setConnectTimeout(15_000);
-                connection.setReadTimeout(20_000);
-                connection.setDoOutput(true);
-                connection.setRequestProperty("Authorization", "Bearer " + token);
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                JSONObject body = new JSONObject();
-                body.put("recipient", recipient);
-                body.put("text", text);
-                body.put("optIn", true);
-                try (OutputStream stream = connection.getOutputStream()) {
-                    stream.write(body.toString().getBytes(StandardCharsets.UTF_8));
-                }
-                int code = connection.getResponseCode();
-                String serverState = "";
-                InputStream stream = code < 400 ? connection.getInputStream() : connection.getErrorStream();
-                if (stream != null) {
-                    try (InputStream input = stream;
-                         BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
-                        String line = reader.readLine();
-                        if (line != null && line.length() <= 4096)
-                            serverState = new JSONObject(line).optString("status", "");
-                    }
-                }
-                if (code == 202 && "SUBMITTED".equals(serverState)) outcome = "submitted";
-                else if ("FAILED".equals(serverState) || (code >= 400 && code < 500)) outcome = "failed";
-                // Any timeout, 5xx, malformed response, or unknown outcome stays REVIEW.
-            } catch (Exception ignored) {
-                outcome = "review";
-            } finally {
-                if (connection != null) connection.disconnect();
-            }
-
-            QueueDb.status(app, rowIndex, "WhatsApp", outcome);
-            final String finalOutcome = outcome;
-            handler.post(() -> {
-                if (run != generation || !running) {
-                    refreshStatus("Last attempt: " + finalOutcome + ". Queue paused.");
-                    return;
-                }
-                if ("submitted".equals(finalOutcome)) {
-                    QueueDb.due(this, "WhatsApp", System.currentTimeMillis() + delayMillis);
-                    refreshStatus("Accepted by backend; waiting before the next row.");
-                    dispatch(url, token, text, delayMillis, run);
-                } else {
-                    running = false;
-            QueueDb.put(this,"whatsapp_running","0");
-                    refreshStatus("Stopped at " + finalOutcome.toUpperCase()
-                            + ". Check backend logs before any manual requeue.");
-                }
-            });
-        }, "whatsapp-cloud-queue").start();
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -295,9 +209,7 @@ public final class WhatsAppCloudActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        running = false;
-            QueueDb.put(this,"whatsapp_running","0");
-        generation++;
+        // Do not stop the user-started foreground queue when leaving the screen.
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
