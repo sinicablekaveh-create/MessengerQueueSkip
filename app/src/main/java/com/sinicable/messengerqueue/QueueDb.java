@@ -6,6 +6,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -55,6 +57,10 @@ final class QueueDb {
                     o.put("sms",allowed&&o.optBoolean("send_sms",false)?"pending":"blocked");
                     changed=true;
                 }
+                if(!o.has("whatsapp")) {
+                    o.put("whatsapp",allowed?"pending":"blocked");
+                    changed=true;
+                }
             }
             if(changed)save(c,a);
             return a;
@@ -63,24 +69,51 @@ final class QueueDb {
         }
     }
 
-    private static void save(Context c,JSONArray arr) {
-        prefs(c).edit().putString("items",arr.toString()).commit();
+    private static boolean save(Context c,JSONArray arr) {
+        return prefs(c).edit().putString("items",arr.toString()).commit();
     }
 
     static synchronized int append(Context c,RecipientImportParser.Result parsed) {
         JSONArray a=items(c);
-        Set<String> known=new HashSet<>();
+        Map<String,JSONObject> known=new HashMap<>();
         for(int i=0;i<a.length();i++) {
             JSONObject v=a.optJSONObject(i);
-            if(v!=null)known.add(v.optString("phone"));
+            if(v!=null)known.put(v.optString("phone"),v);
         }
-        int added=0,blocked=0;
+        int added=0,reactivated=0,blocked=0;
         for(RecipientImportParser.Recipient r:parsed.recipients) {
-            if(!known.add(r.phone))continue;
+            JSONObject previous=known.get(r.phone);
+            if(previous!=null) {
+                try {
+                    if(!previous.has("name")||previous.optString("name").trim().isEmpty())
+                        previous.put("name",r.name);
+                    boolean restored=false;
+                    if(r.optIn&&!previous.optBoolean("opt_in",false)) {
+                        previous.put("opt_in",true);
+                        previous.put("opt_in_source",r.optInSource);
+                        if("blocked".equals(previous.optString("status")))previous.put("status","pending");
+                        for(String app:APPS)if("blocked".equals(previous.optString(key(app))))
+                            previous.put(key(app),"pending");
+                        if("blocked".equals(previous.optString("whatsapp")))
+                            previous.put("whatsapp","pending");
+                        restored=true;
+                    }
+                    if(r.sendSms&&!previous.optBoolean("send_sms",false)) {
+                        previous.put("send_sms",true);
+                        if(previous.optBoolean("opt_in",false)&&"blocked".equals(previous.optString("sms")))
+                            previous.put("sms","pending");
+                        restored=true;
+                    }
+                    if(restored)reactivated++;
+                    // Never reset submitted/review/cleared jobs to pending.
+                }catch(Exception ignored){}
+                continue;
+            }
             JSONObject v=new JSONObject();
             try {
                 v.put("id",UUID.randomUUID().toString());
                 v.put("phone",r.phone);
+                v.put("name",r.name);
                 v.put("opt_in",r.optIn);
                 v.put("opt_in_source",r.optInSource);
                 v.put("send_sms",r.sendSms);
@@ -88,19 +121,127 @@ final class QueueDb {
                 v.put("status",r.optIn?"pending":"blocked");
                 for(String app:APPS)v.put(key(app),r.optIn?"pending":"blocked");
                 v.put("sms",r.optIn&&r.sendSms?"pending":"blocked");
+                v.put("whatsapp",r.optIn?"pending":"blocked");
                 v.put("sms_total_parts",0);
                 v.put("sms_sent_parts",0);
                 v.put("sms_delivered_parts",0);
                 v.put("sms_started_at",0L);
             } catch(Exception ignored){}
             a.put(v);
+            known.put(r.phone,v);
             added++;
             if(!r.optIn)blocked++;
         }
         save(c,a);
-        log(c,"Imported "+added+" unique rows; "+blocked+" blocked without row opt-in; parser invalid="+
+        log(c,"Imported "+added+" new; reactivated "+reactivated+" blocked rows; "+blocked+" new blocked; parser invalid="+
                 parsed.invalidRows+", duplicates="+parsed.duplicateRows);
-        return added;
+        return added+reactivated;
+    }
+
+
+    /** Manual recipient editing is allowed only for unsent rows while all queues are idle.
+     * Submitted, failed, uncertain or in-flight rows remain immutable audit records.
+     */
+    static synchronized boolean editorIdle(Context c) {
+        if ("1".equals(get(c,"direct_running","0"))
+                || "1".equals(get(c,"desired_running","0"))
+                || "1".equals(get(c,"whatsapp_running","0"))) return false;
+        JSONArray rows=items(c);
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row==null) continue;
+            for (String channel:new String[]{"bale","rubika","eitaa","sms","whatsapp"})
+                if ("in_flight".equals(row.optString(channel,""))) return false;
+        }
+        return true;
+    }
+
+    private static boolean editorUnsent(JSONObject row) {
+        if (row==null) return false;
+        for (String channel:new String[]{"bale","rubika","eitaa","sms","whatsapp"}) {
+            String status=row.optString(channel,"blocked");
+            if (!"pending".equals(status) && !"blocked".equals(status)
+                    && !"cleared".equals(status)) return false;
+        }
+        return true;
+    }
+
+    static synchronized boolean editorEditable(Context c,String rowId) {
+        if (!editorIdle(c)) return false;
+        JSONArray rows=items(c);
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row!=null && rowId.equals(row.optString("id"))) return editorUnsent(row);
+        }
+        return false;
+    }
+
+    static synchronized String editorAdd(Context c,String contactName,String rawPhone,boolean sendSms) {
+        if (!editorIdle(c)) return "ابتدا همهٔ صف‌ها را متوقف کنید.";
+        String phone=RecipientImportParser.phone(rawPhone);
+        if (phone.isEmpty()) return "شماره تماس معتبر نیست.";
+        JSONArray rows=items(c);
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row!=null && phone.equals(row.optString("phone"))) return "این شماره قبلاً ثبت شده است.";
+        }
+        RecipientImportParser.Result result=new RecipientImportParser.Result();
+        result.recipients.add(new RecipientImportParser.Recipient(
+                contactName,phone,true,"manual-user-confirmed-at-entry",sendSms,""));
+        return append(c,result)==1?"مخاطب با رضایت ثبت شد.":"ذخیرهٔ مخاطب ناموفق بود.";
+    }
+
+    static synchronized String editorEdit(Context c,String rowId,String contactName,
+                                           String rawPhone,boolean sendSms) {
+        if (!editorIdle(c)) return "ابتدا همهٔ صف‌ها را متوقف کنید.";
+        String phone=RecipientImportParser.phone(rawPhone);
+        if (phone.isEmpty()) return "شماره تماس معتبر نیست.";
+        JSONArray rows=items(c);
+        JSONObject target=null;
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row==null) continue;
+            if (phone.equals(row.optString("phone")) && !rowId.equals(row.optString("id")))
+                return "شمارهٔ تکراری مجاز نیست.";
+            if (rowId.equals(row.optString("id"))) target=row;
+        }
+        if (!editorUnsent(target)) return "این ردیف سابقهٔ ارسال دارد؛ قابل ویرایش نیست.";
+        try {
+            boolean changedPhone=!phone.equals(target.optString("phone"));
+            target.put("name",contactName.trim().isEmpty()?"بدون نام":contactName.trim());
+            target.put("phone",phone);
+            target.put("opt_in",true);
+            target.put("opt_in_source","manual-user-confirmed-at-edit");
+            target.put("send_sms",sendSms);
+            if (changedPhone) {
+                for (String channel:new String[]{"bale","rubika","eitaa","whatsapp"})
+                    target.put(channel,"pending");
+                target.put("sms",sendSms?"pending":"blocked");
+            } else {
+                String sms=target.optString("sms");
+                if ("blocked".equals(sms) && sendSms) target.put("sms","pending");
+                if ("pending".equals(sms) && !sendSms) target.put("sms","blocked");
+            }
+            return save(c,rows)?"تغییرات ذخیره شد.":"ذخیرهٔ تغییرات ناموفق بود.";
+        } catch(Exception e) {
+            return "ویرایش مخاطب ناموفق بود.";
+        }
+    }
+
+    static synchronized String editorDelete(Context c,String rowId) {
+        if (!editorIdle(c)) return "ابتدا همهٔ صف‌ها را متوقف کنید.";
+        JSONArray rows=items(c), kept=new JSONArray();
+        boolean removed=false;
+        for (int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if (row==null) continue;
+            if (rowId.equals(row.optString("id"))) {
+                if (!editorUnsent(row)) return "این ردیف سابقهٔ ارسال دارد؛ برای حفظ گزارش قابل حذف نیست.";
+                removed=true;
+            } else kept.put(row);
+        }
+        if (!removed) return "مخاطب پیدا نشد.";
+        return save(c,kept)?"مخاطب ارسال‌نشده حذف شد.":"حذف مخاطب ناموفق بود.";
     }
 
     /** Interrupted attempts are never blindly retried because send may already have happened. */
@@ -118,6 +259,9 @@ final class QueueDb {
             }
             if("in_flight".equals(v.optString("sms"))) {
                 try {v.put("sms","review");count++;} catch(Exception ignored){}
+            }
+            if("in_flight".equals(v.optString("whatsapp"))) {
+                try {v.put("whatsapp","review");count++;} catch(Exception ignored){}
             }
         }
         if(count>0) {
@@ -182,6 +326,117 @@ final class QueueDb {
         int d=3;
         try {d=Integer.parseInt(get(c,"delay_"+key(app),"3"));} catch(Exception ignored){}
         return Math.max(1,Math.min(1440,d));
+    }
+
+    /** Recover only WhatsApp attempts without touching active queues for other channels. */
+    static synchronized int whatsappRecoverInterrupted(Context c) {
+        JSONArray a=items(c); int recovered=0;
+        for(int i=0;i<a.length();i++) {
+            JSONObject row=a.optJSONObject(i);
+            if(row!=null&&"in_flight".equals(row.optString("whatsapp",""))) {
+                try {row.put("whatsapp","review"); recovered++;}
+                catch(Exception ignored){}
+            }
+        }
+        if(recovered>0) {
+            save(c,a);
+            log(c,"Recovered "+recovered+" WhatsApp attempt(s) as REVIEW; no automatic retry");
+        }
+        return recovered;
+    }
+
+    /** Commit IN_FLIGHT before an outbound HTTP attempt. */
+    static synchronized boolean whatsappMarkInFlight(Context c,int index) {
+        JSONArray a=items(c);
+        JSONObject row=a.optJSONObject(index);
+        if(row==null||!row.optBoolean("opt_in",false)
+                ||!"pending".equals(row.optString("whatsapp","")))return false;
+        try {row.put("whatsapp","in_flight");}
+        catch(Exception e){return false;}
+        return save(c,a);
+    }
+
+    /** Remove only pending WhatsApp work, preserving sent/review records and shared rows. */
+    static synchronized void whatsappClear(Context c) {
+        JSONArray a=items(c);
+        for(int i=0;i<a.length();i++) {
+            JSONObject row=a.optJSONObject(i);
+            if(row==null)continue;
+            String state=row.optString("whatsapp","");
+            if("pending".equals(state)||"in_flight".equals(state)) {
+                try {row.put("whatsapp","in_flight".equals(state)?"review":"cleared");}
+                catch(Exception ignored){}
+            }
+        }
+        save(c,a);
+    }
+
+    static synchronized int whatsappCount(Context c,String status) {
+        JSONArray a=items(c); int n=0;
+        for(int i=0;i<a.length();i++) {
+            JSONObject row=a.optJSONObject(i);
+            if(row!=null&&status.equals(row.optString("whatsapp","")))n++;
+        }
+        return n;
+    }
+
+    /** Durable per-recipient submit key and attempt state for direct account gateway.
+     * A crash or network ambiguity requires human reconciliation, never a new key.
+     */
+    static synchronized String directBegin(Context c, int index, String app) {
+        JSONArray rows=items(c);
+        JSONObject row=rows.optJSONObject(index);
+        if(row==null || !row.optBoolean("opt_in",false))return "";
+        String column=key(app);
+        String state=row.optString(column);
+        if(!"pending".equals(state) && !"image_pending".equals(state))return "";
+        String idemColumn="direct_idem_"+column;
+        String idem=row.optString(idemColumn,"");
+        if(idem.isEmpty()) idem="threeib:"+row.optString("id")+":"+column+":"+UUID.randomUUID();
+        try {
+            row.put(idemColumn,idem);
+            row.put(column,"in_flight");
+            row.put("direct_started_at_"+column,System.currentTimeMillis());
+        } catch(Exception ignored){return "";}
+        return save(c,rows) ? idem : "";
+    }
+
+    static synchronized void directFinish(Context c,int index,String app,
+                                         String outcome,String operationId) {
+        JSONArray rows=items(c);
+        JSONObject row=rows.optJSONObject(index);
+        if(row==null || !"in_flight".equals(row.optString(key(app)))) return;
+        try {
+            row.put(key(app),outcome);
+            if(operationId!=null&&!operationId.isEmpty())
+                row.put("direct_send_id_"+key(app),operationId);
+            row.put("direct_finished_at_"+key(app),System.currentTimeMillis());
+        } catch(Exception ignored) {}
+        save(c,rows);
+    }
+
+    static synchronized int directCount(Context c,String app,String state) {
+        JSONArray rows=items(c);int count=0;
+        for(int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if(row!=null&&state.equals(row.optString(key(app))))count++;
+        }
+        return count;
+    }
+
+    static synchronized void directClearPending(Context c,String app) {
+        JSONArray rows=items(c);
+        for(int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if(row==null)continue;
+            String status=row.optString(key(app));
+            try {
+                if("pending".equals(status)||"image_pending".equals(status))
+                    row.put(key(app),"cleared");
+                else if("in_flight".equals(status)) row.put(key(app),"review");
+            }catch(Exception ignored) {}
+        }
+        save(c,rows);
     }
 
     static synchronized boolean smsEnabled(Context c) {

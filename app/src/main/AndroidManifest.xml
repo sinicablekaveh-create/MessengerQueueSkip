@@ -1,81 +1,74 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.READ_CONTACTS"/>
-    <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
-    <uses-permission android:name="android.permission.SEND_SMS"/>
-    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
-    <uses-feature android:name="android.hardware.telephony.messaging" android:required="false"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <queries>
-        <package android:name="ir.nasim"/>
-        <package android:name="app.rbmain.a"/>
-        <package android:name="ir.eitaa.messenger"/>
-        <package android:name="org.telegram.messenger"/>
-        <package android:name="com.whatsapp"/>
-    </queries>
+
     <application
         android:extractNativeLibs="true"
         android:allowBackup="false"
-        android:label="THREE IB"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:usesCleartextTraffic="false">
-        <activity android:name=".TelegramActivity" android:exported="false"/>
-        <service android:name=".TelegramQueueService" android:exported="false" android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started Telegram personal-account queue with visible controls"/>
-        </service>
-        <activity android:name=".MainActivity" android:exported="true">
+        android:label="${appLabel}"
+        android:icon="@drawable/threeib_launcher"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <activity
+            android:name=".ChannelLauncherActivity"
+            android:exported="true"
+            android:label="${appLabel}">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <activity android:name=".DirectAccountActivity" android:exported="false"/>
+        <activity android:name=".RecipientEditorActivity" android:exported="false"/>
+        <activity android:name=".TelegramRecipientsActivity" android:exported="false"/>
+        <activity android:name=".TelegramActivity" android:exported="false"/>
+        <activity android:name=".SmsOnlyActivity" android:exported="false"/>
+        <activity android:name=".WhatsAppCloudActivity" android:exported="false"/>
+
+        <service
+            android:name=".EmbeddedGatewayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-controlled local account gateway; never opens installed messengers"/>
+        </service>
+
+        <service
+            android:name=".DirectQueueService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-initiated consent-only personal-account queue"/>
+        </service>
+
+        <service
+            android:name=".TelegramQueueService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started Telegram personal-account queue with visible controls"/>
+        </service>
+
         <service
             android:name=".QueueKeeperService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-started persistent messenger queue watchdog with visible controls"/>
+                android:value="User-started SMS queue with visible pause and stop controls"/>
         </service>
-        <receiver
-            android:name=".BootReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
-            </intent-filter>
-        </receiver>
+
         <receiver
             android:name=".SmsStatusReceiver"
             android:exported="false"/>
-        <receiver
-            android:name=".MessengerPackageReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.PACKAGE_ADDED"/>
-                <action android:name="android.intent.action.PACKAGE_REPLACED"/>
-                <action android:name="android.intent.action.PACKAGE_REMOVED"/>
-                <data android:scheme="package"/>
-            </intent-filter>
-        </receiver>
-        <service
-            android:name=".QueueAccessibilityService"
-            android:exported="true"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:label="THREE IB automation">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService"/>
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/queue_accessibility"/>
-        </service>
     </application>
 </manifest>

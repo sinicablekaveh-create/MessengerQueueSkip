@@ -20,16 +20,18 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
-/** Pure-Java recipient parser. Bulk-capable imports require phone + opt_in headers. */
+/** Pure-Java recipient parser for legacy consent and two-column name/phone lists. */
 final class RecipientImportParser {
     static final class Recipient {
+        final String name;
         final String phone;
         final boolean optIn;
         final String optInSource;
         final boolean sendSms;
         final String message;
 
-        Recipient(String phone, boolean optIn, String optInSource, boolean sendSms, String message) {
+        Recipient(String name, String phone, boolean optIn, String optInSource, boolean sendSms, String message) {
+            this.name=name==null||name.trim().isEmpty()?"بدون نام":name.trim();
             this.phone=phone;
             this.optIn=optIn;
             this.optInSource=optInSource==null?"":optInSource.trim();
@@ -46,25 +48,35 @@ final class RecipientImportParser {
     }
 
     static Result read(InputStream stream, String filename) throws Exception {
+        return read(stream,filename,false);
+    }
+
+    /** smsDedicated is true only for the standalone SMS app. */
+    static Result read(InputStream stream, String filename, boolean smsDedicated) throws Exception {
         if(stream==null)throw new IllegalArgumentException("File is not readable");
         String name=filename==null?"":filename.toLowerCase(Locale.ROOT);
         List<Map<String,String>> rows=name.endsWith(".xlsx")?xlsx(stream):csv(stream);
-        return normalize(rows);
+        return normalize(rows,smsDedicated);
     }
 
-    private static Result normalize(List<Map<String,String>> rows) {
+    private static Result normalize(List<Map<String,String>> rows,boolean smsDedicated) {
         Result result=new Result();
         Set<String> seen=new HashSet<>();
         for(Map<String,String> row:rows) {
             String phone=phone(row.get("phone"));
             if(phone.isEmpty()) {result.invalidRows++;continue;}
             if(!seen.add(phone)) {result.duplicateRows++;continue;}
-            boolean optIn=truthy(row.get("opt_in"));
-            boolean sendSms=truthy(row.get("send_sms"));
-            String source=safe(row.get("opt_in_source")).trim();
+            boolean twoColumn=row.containsKey("name")&&!row.containsKey("opt_in");
+            String contactName=safe(row.get("name")).trim();
+            if(contactName.isEmpty())contactName="بدون نام";
+            // Compact files are user-supplied; START still requires explicit consent confirmation.
+            // The presence of a number is not independent proof of recipient permission.
+            boolean optIn=twoColumn||truthy(row.get("opt_in"));
+            boolean sendSms=truthy(row.get("send_sms"))||(twoColumn&&smsDedicated);
+            String source=twoColumn?"user-attestation-required-at-start":safe(row.get("opt_in_source")).trim();
             if(source.isEmpty())source="imported-row";
             if(!optIn)result.blockedRows++;
-            result.recipients.add(new Recipient(phone,optIn,source,sendSms,safe(row.get("message"))));
+            result.recipients.add(new Recipient(contactName,phone,optIn,source,sendSms,safe(row.get("message"))));
         }
         return result;
     }
@@ -78,14 +90,15 @@ final class RecipientImportParser {
             char delimiter=delimiter(headerLine);
             List<String> headers=parseCsvLine(headerLine,delimiter);
             Map<Integer,String> normalizedHeaders=new HashMap<>();
-            boolean phone=false,optIn=false;
+            boolean phone=false,optIn=false,contactName=false;
             for(int i=0;i<headers.size();i++) {
                 String h=header(headers.get(i));
                 normalizedHeaders.put(i,h);
                 if("phone".equals(h))phone=true;
                 if("opt_in".equals(h))optIn=true;
+                if("name".equals(h))contactName=true;
             }
-            if(!phone||!optIn)throw new IllegalArgumentException("Required headers: phone,opt_in");
+            if(!phone||(!optIn&&!contactName))throw new IllegalArgumentException("Required headers: name,phone OR phone,opt_in");
 
             String line;
             int rowCount=0;
@@ -176,14 +189,15 @@ final class RecipientImportParser {
             if(ri>100000)throw new IllegalArgumentException("Too many recipient rows");
             Map<Integer,String> values=parseXlsxRow((Element)rows.item(ri),strings);
             if(ri==0) {
-                boolean phone=false,optIn=false;
+                boolean phone=false,optIn=false,contactName=false;
                 for(Map.Entry<Integer,String> e:values.entrySet()) {
                     String h=header(e.getValue());
                     headers.put(e.getKey(),h);
                     if("phone".equals(h))phone=true;
                     if("opt_in".equals(h))optIn=true;
+                if("name".equals(h))contactName=true;
                 }
-                if(!phone||!optIn)throw new IllegalArgumentException("Required headers: phone,opt_in");
+                if(!phone||(!optIn&&!contactName))throw new IllegalArgumentException("Required headers: name,phone OR phone,opt_in");
                 continue;
             }
             Map<String,String> row=new HashMap<>();
@@ -281,8 +295,11 @@ final class RecipientImportParser {
     }
 
     private static String header(String s) {
-        return safe(s).replace("\uFEFF","").trim().toLowerCase(Locale.ROOT)
+        String h=safe(s).replace("\uFEFF","").trim().toLowerCase(Locale.ROOT)
                 .replace(' ','_').replace('-','_');
+        if(h.equals("نام")||h.equals("اسم")||h.equals("نام_مخاطب")||h.equals("contact_name"))return "name";
+        if(h.equals("شماره")||h.equals("شماره_تماس")||h.equals("شماره_تلفن")||h.equals("شماره_موبایل")||h.equals("موبایل")||h.equals("mobile")||h.equals("phone_number"))return "phone";
+        return h;
     }
 
     private static String safe(String s){return s==null?"":s;}

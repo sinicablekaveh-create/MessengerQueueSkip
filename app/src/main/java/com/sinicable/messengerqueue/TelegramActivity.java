@@ -72,7 +72,8 @@ public class TelegramActivity extends Activity {
             engine.login(value);
         });
 
-        button(root, "IMPORT EXCEL / CSV (phone,opt_in)", () -> {
+        button(root, "مدیریت مخاطبان • ایجاد، ویرایش، حذف", () -> startActivity(new Intent(this,TelegramRecipientsActivity.class)));
+        button(root, "IMPORT EXCEL / CSV (name,phone)", () -> {
             if (engine.running || engine.busy) {
                 toast("Pause the Telegram queue before changing its recipients.");
                 return;
@@ -145,10 +146,11 @@ public class TelegramActivity extends Activity {
         });
 
         TextView note = new TextView(this);
-        note.setText("Telegram uses the official TDLib client library. API credentials are encrypted with Android Keystore. Login may require your phone number, OTP, email confirmation, or 2-step password. Import requires phone and opt_in headers; only rows with opt_in=true enter this queue. Telegram may not resolve every phone number. Server accepted is not a read receipt. The Telegram queue has separate START / PAUSE controls from the Bale, Rubika, Eitaa and SMS queues.");
+        note.setText("Telegram uses the official TDLib client library. API credentials are encrypted with Android Keystore. Login may require your phone number, OTP, email confirmation, or 2-step password. Two-column name/phone files are supported; confirm recipient consent at START. Legacy opt_in columns also work. Telegram may not resolve every phone number. Server accepted is not a read receipt. The Telegram queue has separate START / PAUSE controls from the Bale, Rubika, Eitaa and SMS queues.");
         root.addView(note);
         engine.observer = this::refresh;
         refresh();
+        AppStyle.decorate(this,getWindow().getDecorView());
     }
 
     private EditText edit(LinearLayout root, String hint) {
@@ -178,8 +180,51 @@ public class TelegramActivity extends Activity {
         configState.setText(TelegramConfigStore.hasCredentials(this)
                 ? "API credentials: saved encrypted on this device"
                 : "API credentials: not configured");
-        submit.setEnabled(engine.client != null && !engine.ready);
-        login.setVisibility(engine.ready ? View.GONE : View.VISIBLE);
+        // TDLib supplies the next required authorization step. Only show the
+        // matching input; do not disguise phone numbers or OTPs as passwords.
+        String step = engine.auth;
+        boolean inputRequired = true;
+        int kind = android.text.InputType.TYPE_CLASS_TEXT;
+        String hint = "Waiting for Telegram authentication";
+        switch (step) {
+            case "WaitPhoneNumber":
+                hint = "Phone number (e.g. +989121234567)";
+                kind = android.text.InputType.TYPE_CLASS_PHONE;
+                break;
+            case "WaitCode":
+                hint = "Code received from Telegram";
+                kind = android.text.InputType.TYPE_CLASS_NUMBER;
+                break;
+            case "WaitPassword":
+                hint = "Telegram two-step verification password";
+                kind = android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;
+                break;
+            case "WaitEmailAddress":
+                hint = "Telegram login email address";
+                kind = android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS;
+                break;
+            case "WaitEmailCode":
+                hint = "Code received by email";
+                kind = android.text.InputType.TYPE_CLASS_TEXT;
+                break;
+            default:
+                inputRequired = false;
+                if ("WaitOtherDeviceConfirmation".equals(step))
+                    hint = "Confirm login on your other Telegram device";
+                else if ("WaitRegistration".equals(step))
+                    hint = "Telegram account registration is required";
+                break;
+        }
+        if (login.getInputType() != kind) {
+            login.setInputType(kind);
+            login.setText("");
+        }
+        login.setHint(hint);
+        login.setVisibility(engine.ready || !inputRequired ? View.GONE : View.VISIBLE);
+        submit.setVisibility(engine.ready || !inputRequired ? View.GONE : View.VISIBLE);
+        submit.setEnabled(engine.client != null && inputRequired);
     }
 
     @Override protected void onDestroy() {

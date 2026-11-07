@@ -59,7 +59,7 @@ public class MainActivity extends Activity {
         setContentView(scroll);
 
         root.addView(label("THREE IB",26,Color.WHITE,true));
-        root.addView(label("v3.2.0 • Bale • Rubika • Eitaa • SMS SIM • Telegram TDLib",13,0xFFBAC8DB,false));
+        root.addView(label("v3.2.1 • Bale • Rubika • Eitaa • SMS • Telegram • WhatsApp",13,0xFFBAC8DB,false));
 
         space(root,12);
         access=label("",13,0xFFFFCE75,true);root.addView(access);
@@ -121,7 +121,8 @@ public class MainActivity extends Activity {
         addButton(root,"SELECT SMS SIM",0xFF376C78,()->chooseSmsSim());
         root.addView(label("SMS is text-only. Rows must contain opt_in=true and send_sms=true. Carrier charges may apply.",12,0xFFFFD58A,true));
         addButton(root,"TELEGRAM TDLib • DIRECT QUEUE",0xFF2C718F,()->startActivity(new Intent(this,TelegramActivity.class)));
-        root.addView(label("Telegram has its own login and START / PAUSE controls. Import rows with opt_in=true. WhatsApp Business Cloud API is not included in this build.",12,0xFFFFD58A,false));
+        addButton(root,"WHATSAPP BUSINESS • CLOUD API QUEUE",0xFF247A64,()->startActivity(new Intent(this,WhatsAppCloudActivity.class)));
+        root.addView(label("Telegram and WhatsApp have separate START / PAUSE controls. Both use per-row opt_in and the shared Excel/CSV contact list. WhatsApp needs a Meta Business backend; delivery is not verified.",12,0xFFFFD58A,false));
         refreshSmsSimLabel();
 
         space(root,14);
