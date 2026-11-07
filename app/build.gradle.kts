@@ -5,10 +5,12 @@ android {
     defaultConfig {
         applicationId = "com.sinicable.messengerqueue"
         minSdk = 26
+        ndk { abiFilters.add("arm64-v8a") }
         targetSdk = 35
-        versionCode = 19
-        versionName = "3.2.1"
+        versionCode = 21
+        versionName = "3.3.1"
     }
+    packaging { jniLibs { useLegacyPackaging = true; keepDebugSymbols.add("**/libgoomni.so") } }
     buildTypes {
         release { isMinifyEnabled = false }
     }

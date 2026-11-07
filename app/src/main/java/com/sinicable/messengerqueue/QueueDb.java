@@ -244,6 +244,65 @@ final class QueueDb {
         return n;
     }
 
+    /** Durable per-recipient submit key and attempt state for direct account gateway.
+     * A crash or network ambiguity requires human reconciliation, never a new key.
+     */
+    static synchronized String directBegin(Context c, int index, String app) {
+        JSONArray rows=items(c);
+        JSONObject row=rows.optJSONObject(index);
+        if(row==null || !row.optBoolean("opt_in",false))return "";
+        String column=key(app);
+        String state=row.optString(column);
+        if(!"pending".equals(state) && !"image_pending".equals(state))return "";
+        String idemColumn="direct_idem_"+column;
+        String idem=row.optString(idemColumn,"");
+        if(idem.isEmpty()) idem="threeib:"+row.optString("id")+":"+column+":"+UUID.randomUUID();
+        try {
+            row.put(idemColumn,idem);
+            row.put(column,"in_flight");
+            row.put("direct_started_at_"+column,System.currentTimeMillis());
+        } catch(Exception ignored){return "";}
+        return save(c,rows) ? idem : "";
+    }
+
+    static synchronized void directFinish(Context c,int index,String app,
+                                         String outcome,String operationId) {
+        JSONArray rows=items(c);
+        JSONObject row=rows.optJSONObject(index);
+        if(row==null || !"in_flight".equals(row.optString(key(app)))) return;
+        try {
+            row.put(key(app),outcome);
+            if(operationId!=null&&!operationId.isEmpty())
+                row.put("direct_send_id_"+key(app),operationId);
+            row.put("direct_finished_at_"+key(app),System.currentTimeMillis());
+        } catch(Exception ignored) {}
+        save(c,rows);
+    }
+
+    static synchronized int directCount(Context c,String app,String state) {
+        JSONArray rows=items(c);int count=0;
+        for(int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if(row!=null&&state.equals(row.optString(key(app))))count++;
+        }
+        return count;
+    }
+
+    static synchronized void directClearPending(Context c,String app) {
+        JSONArray rows=items(c);
+        for(int i=0;i<rows.length();i++) {
+            JSONObject row=rows.optJSONObject(i);
+            if(row==null)continue;
+            String status=row.optString(key(app));
+            try {
+                if("pending".equals(status)||"image_pending".equals(status))
+                    row.put(key(app),"cleared");
+                else if("in_flight".equals(status)) row.put(key(app),"review");
+            }catch(Exception ignored) {}
+        }
+        save(c,rows);
+    }
+
     static synchronized boolean smsEnabled(Context c) {
         return "1".equals(get(c,"enabled_sms","0"));
     }
