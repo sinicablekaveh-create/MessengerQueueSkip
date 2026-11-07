@@ -20,7 +20,7 @@ def need(file: str, *patterns: str) -> None:
 def main() -> None:
     # Explicit in-APK sign-in for three independent personal account providers.
     need("DirectAccountActivity.java",
-         r"PROVIDERS\s*\[\s*\]",
+         r"PROVIDERS\s*=\s*\{[^}]*bale[^}]*rubika[^}]*eitaa",
          r"/devices/.*?/login",
          r"/devices/.*?/login/code",
          r"/devices/.*?/login/password",
