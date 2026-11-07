@@ -178,7 +178,39 @@ public class TelegramActivity extends Activity {
         configState.setText(TelegramConfigStore.hasCredentials(this)
                 ? "API credentials: saved encrypted on this device"
                 : "API credentials: not configured");
-        submit.setEnabled(engine.client != null && !engine.ready);
+        // Guide the user through the current TDLib authorization step in this APK.
+        // Telegram can require email or another-device confirmation instead of SMS.
+        String step = engine.auth;
+        if ("WaitPhoneNumber".equals(step)) {
+            login.setHint("شماره حساب تلگرام (+98...)");
+            login.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
+            submit.setText("ارسال شماره و درخواست کد ورود");
+        } else if ("WaitCode".equals(step)) {
+            login.setHint("کد دریافتی از تلگرام");
+            login.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            submit.setText("تأیید کد ورود");
+        } else if ("WaitPassword".equals(step)) {
+            login.setHint("رمز دومرحله‌ای تلگرام");
+            login.setInputType(android.text.InputType.TYPE_CLASS_TEXT |
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            submit.setText("تأیید رمز دومرحله‌ای");
+        } else if ("WaitEmailAddress".equals(step)) {
+            login.setHint("ایمیل برای تأیید حساب");
+            login.setInputType(android.text.InputType.TYPE_CLASS_TEXT |
+                    android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+            submit.setText("ثبت ایمیل");
+        } else if ("WaitEmailCode".equals(step)) {
+            login.setHint("کد تأیید ایمیل");
+            login.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+            submit.setText("تأیید کد ایمیل");
+        } else {
+            login.setHint("منتظر مرحله بعدی ورود تلگرام");
+            submit.setText("CONTINUE TELEGRAM LOGIN");
+        }
+        boolean canEnter = "WaitPhoneNumber".equals(step) || "WaitCode".equals(step)
+                || "WaitPassword".equals(step) || "WaitEmailAddress".equals(step)
+                || "WaitEmailCode".equals(step);
+        submit.setEnabled(engine.client != null && !engine.ready && canEnter);
         login.setVisibility(engine.ready ? View.GONE : View.VISIBLE);
     }
 
