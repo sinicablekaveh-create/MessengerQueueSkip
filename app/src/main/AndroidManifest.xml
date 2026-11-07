@@ -11,6 +11,7 @@
         android:extractNativeLibs="true"
         android:allowBackup="false"
         android:label="${appLabel}"
+        android:icon="@drawable/threeib_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity
@@ -24,6 +25,8 @@
         </activity>
 
         <activity android:name=".DirectAccountActivity" android:exported="false"/>
+        <activity android:name=".RecipientEditorActivity" android:exported="false"/>
+        <activity android:name=".TelegramRecipientsActivity" android:exported="false"/>
         <activity android:name=".TelegramActivity" android:exported="false"/>
         <activity android:name=".SmsOnlyActivity" android:exported="false"/>
         <activity android:name=".WhatsAppCloudActivity" android:exported="false"/>
