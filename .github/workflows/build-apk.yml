@@ -149,3 +149,22 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 7
+
+
+      - name: Publish deliverables branch for Drive handoff
+        if: always() && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d dist
+          tmp="$(mktemp -d)"
+          cp -a dist/. "$tmp/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --orphan codex/three-ib-six-deliverables-v4
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          mkdir -p deliverables
+          cp -a "$tmp"/. deliverables/
+          git add deliverables
+          git commit -m "deliverables: THREE IB six separate APKs and sources"
+          git push --force origin HEAD:refs/heads/codex/three-ib-six-deliverables-v4
