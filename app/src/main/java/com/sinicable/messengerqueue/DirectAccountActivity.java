@@ -88,6 +88,7 @@ public final class DirectAccountActivity extends Activity {
 
         label(column,"۲. فهرست گیرندگان و محتوا",18);
         button(column,"انتخاب فایل Excel / CSV مخاطبان",this::pickContacts);
+        button(column,"مدیریت مخاطبان • ایجاد، ویرایش، حذف",()->startActivity(new Intent(this,RecipientEditorActivity.class)));
         label(column,"اکسل فقط با نام و شماره تماس پذیرفته می‌شود. نام خالی: بدون نام. برای START رضایت گیرندگان را تأیید کنید.",12);
         message=field(column,"متن پیام",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setMinLines(3);
@@ -137,6 +138,7 @@ public final class DirectAccountActivity extends Activity {
         footer=label(column,"درگاه حساب محلی و غیررسمی است. ارسال موفق سرور لزوماً تحویل یا خوانده‌شدن توسط گیرنده نیست. در صورت پاسخ نامشخص، مورد به REVIEW می‌رود.",12);
         select(fixedProvider.isEmpty() ? "bale" : fixedProvider);
         updateSummary("برنامه آماده است؛ وضعیت سرور هنگام ورود بررسی می‌شود.");
+        AppStyle.decorate(this,getWindow().getDecorView());
     }
 
     private TextView label(LinearLayout root,String value,int size){
