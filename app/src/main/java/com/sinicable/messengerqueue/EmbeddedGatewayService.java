@@ -142,8 +142,10 @@ public final class EmbeddedGatewayService extends Service {
         env.put("APP_UI_ENABLED", "false");
         env.put("APP_HOST", "127.0.0.1");
         env.put("APP_PORT", String.valueOf(port()));
-        env.put("EITAA_ENABLED", "true");
-        env.put("RUBIKA_ENABLED", "true");
+        // Enable only the provider compiled into this standalone APK.
+        // Bale is enabled by GoOmni by default; Eitaa/Rubika are explicit opt-ins.
+        env.put("EITAA_ENABLED", String.valueOf("eitaa".equals(BuildConfig.TARGET_CHANNEL)));
+        env.put("RUBIKA_ENABLED", String.valueOf("rubika".equals(BuildConfig.TARGET_CHANNEL)));
         env.put("APP_DATABASE", new File(dir,"goomni.db").getAbsolutePath());
         env.put("APP_MEDIA_ROOT", new File(dir,"media").getAbsolutePath());
         // Discard child logs so account tokens, OTP and messages never appear in logcat.

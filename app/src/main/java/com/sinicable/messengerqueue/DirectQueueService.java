@@ -24,6 +24,12 @@ public final class DirectQueueService extends Service {
     public static final String ACTION_PAUSE="com.sinicable.messengerqueue.direct.PAUSE";
     private static final String CHANNEL="threeib_direct_queue";
     private static final String[] PROVIDERS={"bale","rubika","eitaa"};
+    private static final String TARGET_PROVIDER=BuildConfig.TARGET_CHANNEL;
+
+    private static boolean isTargetProvider(String provider){
+        return provider.equals(TARGET_PROVIDER) &&
+                ("bale".equals(provider)||"rubika".equals(provider)||"eitaa".equals(provider));
+    }
     private final AtomicBoolean running=new AtomicBoolean(false);
     private volatile Thread worker;
 
@@ -33,6 +39,10 @@ public final class DirectQueueService extends Service {
             .createNotificationChannel(new NotificationChannel(CHANNEL,
                     "THREE IB direct message queue", NotificationManager.IMPORTANCE_LOW));
         QueueDb.recoverInterrupted(this);
+        // Standalone flavor hard guard: stale preferences can never activate another provider.
+        for(String provider:PROVIDERS){
+            if(!isTargetProvider(provider)) QueueDb.put(this,"direct_selected_"+provider,"0");
+        }
     }
 
     private void notifyForeground(){
@@ -94,6 +104,7 @@ public final class DirectQueueService extends Service {
                 long nextWait=30_000;
                 for(String provider:PROVIDERS){
                     if(!running.get())break;
+                    if(!isTargetProvider(provider))continue;
                     if(!"1".equals(QueueDb.get(this,"direct_selected_"+provider,"0")))continue;
                     int index=QueueDb.next(this,provider);
                     if(index<0)continue;

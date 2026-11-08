@@ -48,6 +48,29 @@ final class GatewayClient {
         } finally {conn.disconnect();}
     }
 
+    static byte[] avatar(Context context,String alias,String instance,String accountId)throws Exception {
+        if(accountId==null||!accountId.matches("[0-9]{1,20}"))throw new IllegalArgumentException("Invalid account id");
+        final String auth=EmbeddedGatewayService.credential(context);
+        if(auth.isEmpty())throw new IllegalStateException("Local gateway unavailable");
+        URL url=new URL(EmbeddedGatewayService.address()+"/user/avatar?peer=user:"+accountId+"&size=small");
+        if(!"127.0.0.1".equals(url.getHost()))throw new SecurityException("Gateway must stay on loopback");
+        HttpURLConnection conn=(HttpURLConnection)url.openConnection();
+        conn.setInstanceFollowRedirects(false);conn.setRequestMethod("GET");
+        conn.setConnectTimeout(7000);conn.setReadTimeout(30000);
+        conn.setRequestProperty("Accept","image/jpeg,image/png,image/gif");
+        conn.setRequestProperty("Authorization","Basic "+Base64.encodeToString(auth.getBytes(StandardCharsets.UTF_8),Base64.NO_WRAP));
+        conn.setRequestProperty("X-Device-Id",alias);conn.setRequestProperty("X-Device-Instance",instance);
+        try{
+            int status=conn.getResponseCode();
+            if(status<200||status>=300)throw new IllegalStateException("Avatar HTTP "+status);
+            try(InputStream input=conn.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){
+                byte[] buf=new byte[8192];int n;
+                while((n=input.read(buf))!=-1){if(out.size()+n>2_000_000)throw new IllegalArgumentException("Avatar too large");out.write(buf,0,n);}
+                return out.toByteArray();
+            }
+        }finally{conn.disconnect();}
+    }
+
     private static HttpURLConnection open(Context context,String method,String path,String auth,
                                           String alias,String instance,String idem)throws Exception {
         URL url = new URL(EmbeddedGatewayService.address() + path);
