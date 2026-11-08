@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -14,6 +15,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -37,10 +39,11 @@ public final class DirectAccountActivity extends Activity {
     private static final String[] LABELS={"بله","روبیکا","ایتا"};
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final Handler ui=new Handler(Looper.getMainLooper());
-    private EditText phone,code,password,message,minutes;
+    private EditText phone,code,password,message,minutes,profileName;
     private CheckBox confirmation,useImage;
     private CheckBox[] channels;
-    private TextView current,summary,footer;
+    private TextView current,summary,footer,profile;
+    private ImageView profileAvatar;
     private String selected="bale";
     private String fixedProvider="";
 
@@ -85,6 +88,17 @@ public final class DirectAccountActivity extends Activity {
         button(column,"تأیید کد و ورود",this::verifyCode);
         button(column,"ثبت رمز دومرحله‌ای",this::verifyPassword);
         button(column,"بررسی وضعیت حساب",this::refreshAccount);
+
+        label(column,"پروفایل حساب",18);
+        profileAvatar=new ImageView(this);
+        profileAvatar.setAdjustViewBounds(true);
+        profileAvatar.setMaxHeight(320);
+        column.addView(profileAvatar,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,320));
+        profile=label(column,"پروفایل هنوز بارگذاری نشده است.",13);
+        profileName=field(column,"نام نمایشی حساب",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        button(column,"تازه‌سازی پروفایل",this::refreshProfile);
+        button(column,"ذخیره نام پروفایل",this::saveProfileName);
+        button(column,"خروج از حساب",this::logoutAccount);
 
         label(column,"۲. فهرست گیرندگان و محتوا",18);
         button(column,"انتخاب فایل Excel / CSV مخاطبان",this::pickContacts);
@@ -314,6 +328,70 @@ public final class DirectAccountActivity extends Activity {
             return provider+" | auth="+state.optString("auth","?")+
                 " | transport="+state.optString("transport","?")+
                 " | recovery="+state.optString("recovery","?");
+        });
+    }
+
+    private void refreshProfile(){
+        final String provider=selected;
+        network("بارگذاری پروفایل",()->{
+            waitForGateway();
+            String alias=GatewayClient.alias(provider),inst=instance(provider);
+            JSONObject state=account(provider);
+            if(!"authenticated".equals(state.optString("auth")))throw new IllegalStateException("ابتدا وارد حساب شوید");
+            GatewayClient.Reply reply=GatewayClient.call(this,"GET","/user/info",null,alias,inst,null);
+            if(!reply.success())throw new IllegalStateException(reply.summary());
+            JSONObject info=reply.result();
+            String accountId=info.optString("account_id",state.optString("account_id",""));
+            String name=info.optString("name","");
+            String username=info.optString("username","");
+            String about=info.optString("about","");
+            String number=info.optString("phone",QueueDb.get(this,"direct_phone_"+provider,""));
+            final String display="نام: "+(name.isEmpty()?"—":name)+"\nنام کاربری: "+(username.isEmpty()?"—":username)+
+                    "\nشماره: "+(number.isEmpty()?"—":number)+"\nشناسه حساب: "+(accountId.isEmpty()?"—":accountId)+
+                    "\nورود: "+state.optString("auth","?")+" | اتصال: "+state.optString("transport","?")+
+                    "\nبازیابی: "+state.optString("recovery","?")+(about.isEmpty()?"":"\nدرباره: "+about);
+            byte[] avatar=null;
+            try{if(!accountId.isEmpty())avatar=GatewayClient.avatar(this,alias,inst,accountId);}catch(Exception ignored){}
+            final byte[] image=avatar;
+            ui.post(()->{
+                profile.setText(display);
+                profileName.setText(name);
+                if(image!=null&&image.length>0)profileAvatar.setImageBitmap(BitmapFactory.decodeByteArray(image,0,image.length));
+                else profileAvatar.setImageDrawable(null);
+            });
+            return "پروفایل حساب به‌روز شد.";
+        });
+    }
+
+    private void saveProfileName(){
+        final String provider=selected;
+        final String value=profileName.getText().toString().trim();
+        if(value.isEmpty()||value.length()>128){toast("نام پروفایل باید بین ۱ تا ۱۲۸ کاراکتر باشد");return;}
+        network("ذخیره نام پروفایل",()->{
+            waitForGateway();
+            JSONObject body=new JSONObject();body.put("push_name",value);
+            GatewayClient.Reply reply=GatewayClient.call(this,"POST","/user/pushname",body,
+                    GatewayClient.alias(provider),instance(provider),null);
+            if(!reply.success())throw new IllegalStateException(reply.summary());
+            ui.post(this::refreshProfile);
+            return "نام پروفایل ثبت شد.";
+        });
+    }
+
+    private void logoutAccount(){
+        final String provider=selected;
+        network("خروج از حساب",()->{
+            waitForGateway();
+            String inst=instance(provider);
+            if(inst.isEmpty())throw new IllegalStateException("حسابی برای خروج ثبت نشده است");
+            GatewayClient.Reply reply=GatewayClient.call(this,"POST",
+                    "/devices/"+GatewayClient.alias(provider)+"/logout",null,
+                    GatewayClient.alias(provider),inst,null);
+            if(!reply.success())throw new IllegalStateException(reply.summary());
+            QueueDb.put(this,"direct_selected_"+provider,"0");
+            Intent pause=new Intent(this,DirectQueueService.class);pause.setAction(DirectQueueService.ACTION_PAUSE);startService(pause);
+            ui.post(()->{profile.setText("از حساب خارج شدید. اتصال حساب حفظ شده و برای ورود دوباره از شماره/کد استفاده کنید.");profileAvatar.setImageDrawable(null);});
+            return "خروج حساب انجام شد.";
         });
     }
 
