@@ -83,8 +83,28 @@ jobs:
             cp "$input" "$apk"
 
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk"
-            actual="$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+            badging="$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$apk")"
+            actual="$(printf '%s\n' "$badging" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
             test "$actual" = "${PKG[$channel]}"
+
+            # Independent launchability and least-privilege checks on every final APK.
+            grep -Fq "versionName='$VERSION_NAME'" <<< "$badging"
+            grep -Fq "launchable-activity: name='com.sinicable.messengerqueue.ChannelLauncherActivity'" <<< "$badging"
+            grep -Fq "native-code: 'arm64-v8a'" <<< "$badging"
+            if [[ "$channel" == "sms" ]]; then
+              grep -Fq "uses-permission: name='android.permission.SEND_SMS'" <<< "$badging"
+              grep -Fq "uses-permission: name='android.permission.READ_PHONE_STATE'" <<< "$badging"
+            else
+              ! grep -Fq "uses-permission: name='android.permission.SEND_SMS'" <<< "$badging"
+              ! grep -Fq "uses-permission: name='android.permission.READ_PHONE_STATE'" <<< "$badging"
+            fi
+            manifest_tree="$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump xmltree --file AndroidManifest.xml "$apk")"
+            if [[ "$channel" == "bale" || "$channel" == "rubika" || "$channel" == "eitaa" ]]; then
+              grep -Fq "android:usesCleartextTraffic" <<< "$manifest_tree"
+              unzip -Z1 "$apk" | grep -Fx 'lib/arm64-v8a/libgoomni.so' >/dev/null
+            else
+              ! grep -Fq "android:usesCleartextTraffic" <<< "$manifest_tree"
+            fi
 
             {
               echo "THREE IB separate app v$VERSION_NAME"

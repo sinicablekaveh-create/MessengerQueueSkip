@@ -57,7 +57,7 @@ public final class DirectAccountActivity extends Activity {
         scroll.addView(column);
         setContentView(scroll);
 
-        TextView header=label(column,"THREE IB 3.3.2 • حساب شخصی",22);
+        TextView header=label(column,"THREE IB "+BuildConfig.VERSION_NAME+" • حساب شخصی",22);
         header.setTextColor(0xFF166346);
         label(column,"ورود با شماره و کد در همین برنامه؛ بدون بازکردن بله، روبیکا یا ایتای نصب‌شده. سرویس ارتباطی غیررسمی، محلی و قابل‌وقفه است.",13);
 
@@ -98,7 +98,7 @@ public final class DirectAccountActivity extends Activity {
         useImage.setChecked("1".equals(QueueDb.get(this,"direct_image_enabled","0")));
         column.addView(useImage);
         minutes=field(column,"فاصلهٔ ارسال برای پیام‌رسان انتخاب‌شده (۱ تا ۱۴۴۰ دقیقه)",InputType.TYPE_CLASS_NUMBER);
-        minutes.setText(String.valueOf(QueueDb.delayMinutes(this,"Bale")));
+        minutes.setText(String.valueOf(QueueDb.delayMinutes(this,selected)));
         button(column,"ذخیرهٔ فاصله برای پیام‌رسان انتخاب‌شده",this::saveSelectedDelay);
 
         label(column,"۳. صف مستقل ارسال",18);
@@ -135,7 +135,7 @@ public final class DirectAccountActivity extends Activity {
 
         summary=label(column,"",13);
         footer=label(column,"درگاه حساب محلی و غیررسمی است. ارسال موفق سرور لزوماً تحویل یا خوانده‌شدن توسط گیرنده نیست. در صورت پاسخ نامشخص، مورد به REVIEW می‌رود.",12);
-        select("bale");
+        select(fixedProvider.isEmpty() ? "bale" : fixedProvider);
         updateSummary("برنامه آماده است؛ وضعیت سرور هنگام ورود بررسی می‌شود.");
     }
 

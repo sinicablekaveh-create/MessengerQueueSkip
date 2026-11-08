@@ -46,7 +46,7 @@ public final class SmsOnlyActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
-        text(root, "THREE IB 4.0.0 • SMS SIM", 23);
+        text(root, "THREE IB "+BuildConfig.VERSION_NAME+" • SMS SIM", 23);
         text(root, "اپ مستقل SMS. فقط ردیف‌های opt_in=true و send_sms=true وارد صف می‌شوند. هزینه پیامک طبق اپراتور است.", 13);
 
         button(root, "انتخاب Excel / CSV مخاطبان", this::pickRecipients);
