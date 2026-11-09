@@ -73,7 +73,7 @@ jobs:
           PKG[rubika]="com.sinicable.threeib.rubika"
           PKG[eitaa]="com.sinicable.threeib.eitaa"
           PKG[telegram]="com.sinicable.threeib.telegram"
-          PKG[sms]="com.sinicable.threeib.sms"
+          PKG[sms]="com.sinicable.threeib.sms.simple"
           PKG[whatsapp]="com.sinicable.threeib.whatsapp"
 
           for channel in bale rubika eitaa telegram sms whatsapp; do
@@ -127,7 +127,7 @@ jobs:
                   echo "Account mode: official TDLib, API ID/API HASH stored encrypted, phone/OTP/2FA interactive login."
                   ;;
                 sms)
-                  echo "Mode: Android SmsManager using selected active SIM subscription; text-only; SEND_SMS runtime permission."
+                  echo "Mode: SMS Simple standalone package; Excel/CSV replaces queue, selected SIM SmsManager dispatch, text-only, SEND_SMS runtime permission."
                   ;;
                 whatsapp)
                   echo "Mode: official WhatsApp Business Cloud API client queue."

@@ -44,9 +44,10 @@ public class QueueKeeperService extends Service {
             QueueDb.smsRecoverStale(QueueKeeperService.this);
             SmsQueueEngine.tick(QueueKeeperService.this);
             refreshNotification();
-            boolean messengerOn=messengerQueuesEnabled();
-            QueueAccessibilityService a=QueueAccessibilityService.INSTANCE;
-            String state=messengerOn?(a==null?"Accessibility reconnect pending":a.state()):"SMS queue active";
+            boolean smsOnly="sms".equals(BuildConfig.TARGET_CHANNEL);
+            boolean messengerOn=!smsOnly&&messengerQueuesEnabled();
+            QueueAccessibilityService a=messengerOn?QueueAccessibilityService.INSTANCE:null;
+            String state=smsOnly?"SMS queue active":(messengerOn?(a==null?"Accessibility reconnect pending":a.state()):"Queue active");
             if(messengerOn&&a==null) {
                 if(accessibilityMissingSince<=0)accessibilityMissingSince=System.currentTimeMillis();
                 if(System.currentTimeMillis()-accessibilityMissingSince>=30000)postAccessibilityAlert();
@@ -80,13 +81,19 @@ public class QueueKeeperService extends Service {
     @Override public void onCreate(){
         super.onCreate();
         ensureChannel();
-        registerNetworkMonitor();
+        // The standalone SMS flavor does not require Internet or Accessibility.
+        if("sms".equals(BuildConfig.TARGET_CHANNEL)) {
+            QueueDb.put(this,"enabled_bale","0");
+            QueueDb.put(this,"enabled_rubika","0");
+            QueueDb.put(this,"enabled_eitaa","0");
+            QueueDb.put(this,"enabled_sms","1");
+        } else registerNetworkMonitor();
     }
 
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         String action=intent==null?ACTION_START:intent.getAction();
         if(ACTION_STOP.equals(action)){
-            QueueAccessibilityService a=QueueAccessibilityService.INSTANCE;
+            QueueAccessibilityService a="sms".equals(BuildConfig.TARGET_CHANNEL)?null:QueueAccessibilityService.INSTANCE;
             if(a!=null)a.stopQueue();
             QueueDb.put(this,"desired_running","0");
             QueueDb.put(this,"desired_paused","0");
@@ -94,7 +101,7 @@ public class QueueKeeperService extends Service {
             return START_NOT_STICKY;
         }
         if(ACTION_TOGGLE.equals(action)){
-            QueueAccessibilityService a=QueueAccessibilityService.INSTANCE;
+            QueueAccessibilityService a="sms".equals(BuildConfig.TARGET_CHANNEL)?null:QueueAccessibilityService.INSTANCE;
             if(messengerQueuesEnabled()&&a!=null)a.togglePause();
             else {
                 boolean paused="1".equals(QueueDb.get(this,"desired_paused","0"));
@@ -115,8 +122,10 @@ public class QueueKeeperService extends Service {
     private void ensureChannel(){
         if(Build.VERSION.SDK_INT>=26){
             NotificationChannel ch=new NotificationChannel(
-                    CHANNEL,"Messenger queue",NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("Keeps user-started automatic queues visible and resilient");
+                    CHANNEL,"sms".equals(BuildConfig.TARGET_CHANNEL)?"THREE IB SMS queue":"Messenger queue",NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("sms".equals(BuildConfig.TARGET_CHANNEL)
+                    ?"Keeps the user-started SMS queue visible and controllable"
+                    :"Keeps user-started automatic queues visible and resilient");
             ch.setShowBadge(false);
             NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
             if(nm!=null){
@@ -165,23 +174,24 @@ public class QueueKeeperService extends Service {
         if(Build.VERSION.SDK_INT>=23)pflags|=PendingIntent.FLAG_IMMUTABLE;
         PendingIntent content=PendingIntent.getActivity(this,1,open,pflags);
 
-        boolean messengerOn=messengerQueuesEnabled();
-        String state=!messengerOn
+        boolean smsOnly="sms".equals(BuildConfig.TARGET_CHANNEL);
+        boolean messengerOn=!smsOnly&&messengerQueuesEnabled();
+        String state=smsOnly
                 ?"SMS queue active"
-                :(QueueAccessibilityService.INSTANCE==null
+                :(!messengerOn?"Queue active":(QueueAccessibilityService.INSTANCE==null
                     ?"Waiting for Accessibility service"
-                    :QueueAccessibilityService.INSTANCE.state());
-        String network="1".equals(QueueDb.get(this,"network_available","1"))?"ONLINE":"OFFLINE";
+                    :QueueAccessibilityService.INSTANCE.state()));
+        String network=smsOnly?"CELLULAR SMS":"1".equals(QueueDb.get(this,"network_available","1"))?"ONLINE":"OFFLINE";
         boolean paused="1".equals(QueueDb.get(this,"desired_paused","0"));
 
         Notification.Builder b=Build.VERSION.SDK_INT>=26
                 ?new Notification.Builder(this,CHANNEL)
                 :new Notification.Builder(this);
         b.setSmallIcon(android.R.drawable.stat_notify_sync)
-         .setContentTitle("Messenger Queue Skip")
+         .setContentTitle("sms".equals(BuildConfig.TARGET_CHANNEL)?"THREE IB • SMS":"Messenger Queue Skip")
          .setContentText(state+" | "+network)
          .setStyle(new Notification.BigTextStyle().bigText(
-                 state+" | Network: "+network+"\n"+QueueDb.summary(this)))
+                 state+" | "+network+"\n"+(smsOnly?QueueDb.smsSummary(this):QueueDb.summary(this))))
          .setOngoing(true)
          .setOnlyAlertOnce(true)
          .setVisibility(Notification.VISIBILITY_PRIVATE)
