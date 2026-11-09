@@ -175,7 +175,10 @@ public final class DirectQueueService extends Service {
                         GatewayClient.Reply reply;
                         if(picture){
                             String mime=QueueDb.get(this,"direct_image_mime","image/jpeg");
-                            reply=GatewayClient.sendImage(this,alias,instance,key,recipient,content,image,mime);
+                            if("rubika".equals(provider))
+                                reply=GatewayClient.sendImagePeer(this,alias,instance,key,resolvedPeer,content,image,mime);
+                            else
+                                reply=GatewayClient.sendImage(this,alias,instance,key,recipient,content,image,mime);
                         }else{
                             JSONObject payload=new JSONObject();
                             if("rubika".equals(provider)) payload.put("peer",resolvedPeer);
