@@ -56,7 +56,7 @@ public final class RubikaSimpleActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
-        TextView title=label(root,"THREE IB • RUBIKA SIMPLE "+BuildConfig.VERSION_NAME,23);
+        TextView title=label(root,"THREE IB • RUBIKA PERSONAL "+BuildConfig.VERSION_NAME,23);
         title.setTextColor(0xFF166346);
         label(root,"ورود حساب شخصی داخل خود APK، Excel/CSV، متن/عکس، فاصله و START RUBIKA.",13);
 
@@ -107,7 +107,7 @@ public final class RubikaSimpleActivity extends Activity {
 
         Button start=new Button(this);
         start.setAllCaps(false);
-        start.setText("START RUBIKA");
+        start.setText("START / RESUME AUTOMATIC");
         start.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFF07865B));
         start.setTextColor(0xFFFFFFFF);
         start.setOnClickListener(v->startQueue());
@@ -530,7 +530,7 @@ public final class RubikaSimpleActivity extends Activity {
         service.setAction(DirectQueueService.ACTION_START);
         try{
             startForegroundService(service);
-            refreshQueue("START RUBIKA اجرا شد");
+            refreshQueue("START / RESUME AUTOMATIC اجرا شد");
         }catch(Exception error){
             QueueDb.put(this,"direct_running","0");
             QueueDb.put(this,"direct_selected_rubika","0");
