@@ -25,7 +25,14 @@ final class GatewayClient {
         String code(){return data.optString("code","");}
         boolean success(){return http >= 200 && http < 300 && !"SEND_UNKNOWN".equals(code());}
         String summary(){
-            return "HTTP " + http + ": " + data.optString("message", code());
+            String c=code();
+            String message=data.optString("message","");
+            String detail=data.optString("details","");
+            String out="HTTP "+http;
+            if(!c.isEmpty())out+=" ["+c+"]";
+            if(!message.isEmpty())out+=": "+message;
+            if(!detail.isEmpty())out+=" | "+detail;
+            return out;
         }
     }
 

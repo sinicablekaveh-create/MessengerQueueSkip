@@ -21,6 +21,10 @@ final class SmsQueueEngine {
         if(!"1".equals(QueueDb.get(c,"desired_running","0")))return;
         if("1".equals(QueueDb.get(c,"desired_paused","0")))return;
         if(c.checkSelfPermission(Manifest.permission.SEND_SMS)!=PackageManager.PERMISSION_GRANTED)return;
+        if(!c.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)) {
+            QueueDb.log(c,"SMS unavailable: device has no telephony messaging feature");
+            return;
+        }
         if(System.currentTimeMillis()<QueueDb.smsDue(c))return;
         if(QueueDb.smsHasInFlight(c))return;
 

@@ -27,6 +27,29 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.9'
+          cache: false
+
+      - name: Rebuild Rubika Direct native gateway from reviewed upstream source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/goomni"
+          git clone --depth 1 --branch v2.4.1 https://github.com/mimalef70/goomni.git "$RUNNER_TEMP/goomni"
+          cd "$RUNNER_TEMP/goomni"
+          test "$(git rev-parse --short=7 HEAD)" = "a49bd70"
+          python3 "$GITHUB_WORKSPACE/tools/patch-goomni-rubika-direct.py"
+          cd src
+          go mod download
+          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
+            go build -tags purego -buildmode=pie -trimpath -ldflags="-s -w" \
+            -o "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so" .
+          test -s "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so"
+          file "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so"
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -70,10 +93,10 @@ jobs:
           mkdir -p dist
           declare -A PKG
           PKG[bale]="com.sinicable.threeib.bale"
-          PKG[rubika]="com.sinicable.threeib.rubika"
+          PKG[rubika]="com.sinicable.threeib.rubika.direct"
           PKG[eitaa]="com.sinicable.threeib.eitaa"
           PKG[telegram]="com.sinicable.threeib.telegram"
-          PKG[sms]="com.sinicable.threeib.sms"
+          PKG[sms]="com.sinicable.threeib.sms.simple"
           PKG[whatsapp]="com.sinicable.threeib.whatsapp"
 
           for channel in bale rubika eitaa telegram sms whatsapp; do
@@ -118,7 +141,13 @@ jobs:
               echo "Commit: $GITHUB_SHA"
               echo "Signing: GitHub Actions debug signature; not stable production signing."
               case "$channel" in
-                bale|rubika|eitaa)
+                rubika)
+                  echo "Account mode: Rubika Direct isolated APK; rebuilt GoOmni v2.4.1 source with current Rubika PWA HTTP headers and explicit upstream diagnostics."
+                  echo "UI: Excel/CSV replaces queue, text, interval, START RUBIKA, STOP."
+                  echo "No installed Rubika application is launched or screen-controlled."
+                  echo "Provider implementation is unofficial and live account delivery is not asserted by this build."
+                  ;;
+                bale|eitaa)
                   echo "Account mode: phone + OTP + optional 2FA inside APK through bundled localhost GoOmni gateway."
                   echo "No installed messenger application is launched or screen-controlled."
                   echo "Provider implementation is unofficial and live account delivery is not asserted by this build."
@@ -127,7 +156,7 @@ jobs:
                   echo "Account mode: official TDLib, API ID/API HASH stored encrypted, phone/OTP/2FA interactive login."
                   ;;
                 sms)
-                  echo "Mode: Android SmsManager using selected active SIM subscription; text-only; SEND_SMS runtime permission."
+                  echo "Mode: SMS Simple standalone package; Excel/CSV replaces queue, selected SIM SmsManager dispatch, text-only, SEND_SMS runtime permission."
                   ;;
                 whatsapp)
                   echo "Mode: official WhatsApp Business Cloud API client queue."
