@@ -140,8 +140,9 @@ public final class DirectQueueService extends Service {
                         } catch(RubikaPeerResolver.ResolveException error) {
                             if(error.terminal) {
                                 QueueDb.status(this,index,provider,"failed");
+                                QueueDb.due(this,provider,System.currentTimeMillis()+1500L);
                                 QueueDb.put(this,"direct_service_state",
-                                        "rubika: recipient is not resolvable to a user GUID");
+                                        "rubika: skipped one recipient without a usable user GUID");
                             } else {
                                 pauseProvider(provider,"Recipient GUID resolution unavailable");
                             }
@@ -220,15 +221,23 @@ public final class DirectQueueService extends Service {
                         if(lock.isHeld())lock.release();
                     }
                     QueueDb.directFinish(this,index,provider,state,sendId);
-                    if(!"submitted".equals(state)){
-                        pauseProvider(provider,"Send "+state+"; manual review required");
-                    }else{
+                    if("submitted".equals(state)){
                         QueueDb.due(this,provider,System.currentTimeMillis()
                             +QueueDb.delayMinutes(this,provider)*60_000L);
                         QueueDb.put(this,"direct_service_state","Gateway accepted "+provider+
                             " operation; this is not a delivery receipt.");
+                    }else if("failed".equals(state)){
+                        // A deterministic recipient/provider rejection must not hold the entire
+                        // consented queue hostage. Keep it terminal and continue with the next row.
+                        QueueDb.due(this,provider,System.currentTimeMillis()+2000L);
+                        QueueDb.put(this,"direct_service_state",
+                                provider+": one recipient failed; continuing to next row");
+                    }else{
+                        // REVIEW/unknown may already have been submitted. Pause to prevent duplicates.
+                        pauseProvider(provider,"Send "+state+"; manual review required");
                     }
-                    // Respect all selected app-specific intervals.
+                    // Respect the configured interval after successful sends. Failed rows get
+                    // only a short anti-hammer delay; ambiguous REVIEW pauses the provider.
                     break;
                 }
                 if(!selectedPending){
