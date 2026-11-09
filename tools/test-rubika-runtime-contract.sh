@@ -5,11 +5,12 @@ GOOMNI="${1:?usage: test-rubika-runtime-contract.sh /path/to/goomni}"
 CLIENT="$GOOMNI/src/internal/rubikameow/client.go"
 SERVER="$GOOMNI/src/ui/rest/server.go"
 MULTIPART="$GOOMNI/src/ui/rest/multipart.go"
+SEND_CONTRACT="$GOOMNI/src/ui/rest/send_contract.go"
 CONTRACT="$GOOMNI/src/infrastructure/providers/rubika/contract.go"
 EXTENDED="$GOOMNI/src/internal/rubikameow/extended.go"
 EVIDENCE="$GOOMNI/src/infrastructure/providers/evidence/records.json"
 
-for f in "$CLIENT" "$SERVER" "$MULTIPART" "$CONTRACT" "$EXTENDED" "$EVIDENCE"; do
+for f in "$CLIENT" "$SERVER" "$MULTIPART" "$SEND_CONTRACT" "$CONTRACT" "$EXTENDED" "$EVIDENCE"; do
   test -s "$f"
 done
 
@@ -20,7 +21,7 @@ grep -Fq 'func (c *Client) SubmitPassword' "$CLIENT"
 grep -Fq 'r.Post("/operations/:operation"' "$SERVER"
 grep -Fq 'r.Get("/send/operations/:send_id"' "$SERVER"
 grep -Fq 'fileField := kind' "$MULTIPART"
-grep -Fq 'fields["caption"]' "$MULTIPART"
+grep -Fq 'fields["caption"]' "$SEND_CONTRACT"
 grep -Fq 'case "contacts.add":' "$EXTENDED"
 grep -Fq 'method = "addAddressBook"' "$EXTENDED"
 grep -Fq 'MaxTextCharacters: 4200' "$CONTRACT"
