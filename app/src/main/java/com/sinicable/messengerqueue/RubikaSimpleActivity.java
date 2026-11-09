@@ -33,9 +33,9 @@ public final class RubikaSimpleActivity extends Activity {
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final Handler ui=new Handler(Looper.getMainLooper());
 
-    private EditText phone,code,password,message,minutes;
-    private CheckBox confirmation;
-    private TextView accountState,imported,queueState,footer;
+    private EditText phone,code,password,message,minutes,testPhone;
+    private CheckBox confirmation,testOwned;
+    private TextView accountState,imported,queueState,preflightState,footer;
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
@@ -64,6 +64,8 @@ public final class RubikaSimpleActivity extends Activity {
         button(root,"ثبت رمز دومرحله‌ای",this::verifyPassword);
         button(root,"بررسی وضعیت حساب",this::refreshAccount);
         accountState=label(root,"",13);
+        button(root,"CHECK READY • بررسی کامل اتصال",this::checkReady);
+        preflightState=label(root,"آمادگی: بررسی نشده",13);
 
         label(root,"2) فایل مخاطبان",18);
         button(root,"انتخاب Excel / CSV",this::pickContacts);
@@ -79,6 +81,13 @@ public final class RubikaSimpleActivity extends Activity {
         confirmation=new CheckBox(this);
         confirmation.setText("تأیید می‌کنم همه شماره‌های فایل انتخاب‌شده برای دریافت این پیام رضایت دارند.");
         root.addView(confirmation);
+
+        label(root,"4) تست یک پیام قبل از صف",18);
+        testPhone=field(root,"شماره تستی خودم / مجاز، مثل 0912...",InputType.TYPE_CLASS_PHONE);
+        testOwned=new CheckBox(this);
+        testOwned.setText("تأیید می‌کنم شماره تستی متعلق به خودم یا گیرندهٔ مجاز است.");
+        root.addView(testOwned);
+        button(root,"TEST ONE • ارسال یک پیام تستی",this::testOne);
 
         Button start=new Button(this);
         start.setAllCaps(false);
@@ -225,6 +234,77 @@ public final class RubikaSimpleActivity extends Activity {
                 " | transport="+state.optString("transport","?"));
     }
 
+    private String preflight() throws Exception {
+        waitForGateway();
+
+        GatewayClient.Reply ready=GatewayClient.call(this,"GET","/ready",null,null,null,null);
+        if(!ready.success())throw new IllegalStateException("Gateway readiness failed: "+ready.summary());
+
+        String inst=instance();
+        if(inst.isEmpty())throw new IllegalStateException("ابتدا با شماره و کد وارد روبیکا شو");
+
+        JSONObject state=account();
+        if(!"authenticated".equals(state.optString("auth"))||
+                !"connected".equals(state.optString("transport")))
+            throw new IllegalStateException("حساب روبیکا آماده نیست: auth="+
+                    state.optString("auth","?")+" transport="+state.optString("transport","?"));
+
+        GatewayClient.Reply caps=GatewayClient.call(this,"GET",
+                "/devices/"+GatewayClient.alias(PROVIDER)+"/capabilities",
+                null,GatewayClient.alias(PROVIDER),inst,null);
+        if(!caps.success())throw new IllegalStateException("Rubika capabilities unavailable: "+caps.summary());
+
+        return "READY ✅ | gateway=ready | auth=authenticated | transport=connected | capabilities=ok";
+    }
+
+    private void checkReady(){
+        network("بررسی کامل آمادگی",()->{
+            String result=preflight();
+            ui.post(()->preflightState.setText("آمادگی: "+result));
+            return result;
+        });
+    }
+
+    private void testOne(){
+        if(testOwned==null||!testOwned.isChecked()){
+            toast("مالکیت/مجوز شماره تستی را تأیید کن");return;
+        }
+        final String recipient=GatewayClient.normalizedPhone(testPhone.getText().toString());
+        if(recipient.isEmpty()){toast("شماره تستی معتبر وارد کن");return;}
+        final String body=message.getText().toString().trim();
+        if(body.isEmpty()){toast("متن پیام را وارد کن");return;}
+
+        network("ارسال TEST ONE",()->{
+            String ready=preflight();
+            JSONObject payload=new JSONObject();
+            payload.put("phone",recipient);
+            payload.put("message",body);
+            String idem="rubika-test-"+UUID.randomUUID();
+            GatewayClient.Reply reply=GatewayClient.call(this,"POST","/send/message",
+                    payload,GatewayClient.alias(PROVIDER),instance(),idem);
+            if(!reply.success())throw new IllegalStateException(reply.summary());
+
+            String state=reply.result().optString("state","");
+            String sendId=reply.result().optString("send_id","");
+            if(("queued".equals(state)||"sending".equals(state))&&!sendId.isEmpty()){
+                for(int i=0;i<8;i++){
+                    Thread.sleep(1500L);
+                    GatewayClient.Reply check=GatewayClient.call(this,"GET",
+                            "/send/operations/"+sendId,null,
+                            GatewayClient.alias(PROVIDER),instance(),null);
+                    if(!check.success())break;
+                    state=check.result().optString("state",state);
+                    if("succeeded".equals(state)||"failed".equals(state)||"unknown".equals(state))break;
+                }
+            }
+            final String finalState=state.isEmpty()?"accepted":state;
+            QueueDb.put(this,"rubika_last_test_state",finalState);
+            ui.post(()->preflightState.setText("TEST ONE: "+finalState+" | "+ready));
+            return "TEST ONE نتیجه: "+finalState+
+                    ("succeeded".equals(finalState)?" ✅":"");
+        });
+    }
+
     private void pickContacts(){
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");
@@ -283,13 +363,9 @@ public final class RubikaSimpleActivity extends Activity {
         try{delay=Integer.parseInt(minutes.getText().toString().trim());}catch(Exception e){delay=0;}
         if(delay<1||delay>1440){toast("فاصله باید ۱ تا ۱۴۴۰ دقیقه باشد");return;}
         final int selectedDelay=delay;
-        network("بررسی حساب و START",()->{
-            waitForGateway();
-            if(instance().isEmpty())throw new IllegalStateException("ابتدا با شماره و کد وارد روبیکا شو");
-            JSONObject state=account();
-            if(!"authenticated".equals(state.optString("auth"))||
-                    !"connected".equals(state.optString("transport")))
-                throw new IllegalStateException("حساب روبیکا آماده نیست: "+state.optString("auth","?"));
+        network("بررسی کامل و START",()->{
+            String ready=preflight();
+            ui.post(()->preflightState.setText("آمادگی: "+ready));
 
             QueueDb.put(this,"direct_text",text);
             QueueDb.put(this,"direct_image_enabled","0");
