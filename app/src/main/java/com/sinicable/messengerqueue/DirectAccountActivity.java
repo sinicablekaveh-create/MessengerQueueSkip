@@ -268,6 +268,12 @@ public final class DirectAccountActivity extends Activity {
         return false;
     }
 
+    private static boolean hasLiveEvidence(JSONObject evidence){
+        if(evidence==null)return false;
+        String level=evidence.optString("level","");
+        return "live_scoped".equals(level)||"live_response".equals(level);
+    }
+
     private void assertProviderReady(String provider,String text,boolean image)throws Exception{
         GatewayClient.Reply reply=GatewayClient.call(this,"GET","/app/providers",null,null,null,null);
         if(!reply.success())throw new IllegalStateException(reply.summary());
@@ -280,12 +286,19 @@ public final class DirectAccountActivity extends Activity {
         }
         if(descriptor==null||!descriptor.optBoolean("enabled",false))
             throw new IllegalStateException("درگاه "+provider+" در این ساخت فعال نیست");
+        if(!hasLiveEvidence(descriptor.optJSONObject("evidence")))
+            throw new IllegalStateException(provider+" در این ساخت شاهد زندهٔ کافی برای provider ندارد");
         JSONObject send=descriptor.optJSONObject("send");
         JSONArray kinds=send==null?null:send.optJSONArray("kinds");
+        JSONObject sendEvidence=send==null?null:send.optJSONObject("evidence");
         if(!text.trim().isEmpty()&&!contains(kinds,"text"))
             throw new IllegalStateException(provider+" در این ساخت ارسال متن را اعلام نکرده است");
+        if(!text.trim().isEmpty()&&(sendEvidence==null||!hasLiveEvidence(sendEvidence.optJSONObject("text"))))
+            throw new IllegalStateException(provider+" شاهد زندهٔ کافی برای ارسال متن ندارد");
         if(image&&!contains(kinds,"image"))
             throw new IllegalStateException(provider+" در این ساخت ارسال تصویر را اعلام نکرده است");
+        if(image&&(sendEvidence==null||!hasLiveEvidence(sendEvidence.optJSONObject("image"))))
+            throw new IllegalStateException(provider+" شاهد زندهٔ کافی برای ارسال تصویر ندارد");
         if(send!=null){
             int maxChars=send.optInt("max_text_characters",0);
             if(maxChars>0&&text.codePointCount(0,text.length())>maxChars)
@@ -310,6 +323,18 @@ public final class DirectAccountActivity extends Activity {
             }
             if(!contactResolve)
                 throw new IllegalStateException("Rubika contacts.add برای تبدیل شماره به شناسهٔ کاربر در دسترس نیست");
+            JSONObject accountBody=new JSONObject();
+            GatewayClient.Reply accountInfo=GatewayClient.call(this,"POST",
+                    "/operations/account.info",accountBody,alias,instance(provider),null);
+            if(!accountInfo.success())
+                throw new IllegalStateException("Rubika account.info ناموفق بود: "+accountInfo.summary());
+            String liveGuid=accountInfo.result().optString("user_guid","");
+            JSONObject status=account(provider);
+            String boundGuid=status.optString("account_id","");
+            if(!liveGuid.matches("^u0[A-Za-z0-9]{1,126}$"))
+                throw new IllegalStateException("Rubika account.info شناسهٔ معتبر برنگرداند");
+            if(!boundGuid.isEmpty()&&!liveGuid.equals(boundGuid))
+                throw new IllegalStateException("شناسهٔ حساب زنده با اتصال ذخیره‌شده همخوان نیست");
         }
     }
     private String provision(String provider)throws Exception{
