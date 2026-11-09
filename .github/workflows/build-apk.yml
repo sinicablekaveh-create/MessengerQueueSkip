@@ -174,9 +174,9 @@ jobs:
           done
 
           rm -f dist/TARGET_CHANNEL.txt
-          sha256sum dist/*.apk dist/*-SOURCE-*.zip > dist/SHA256SUMS.txt
           (
             cd dist
+            sha256sum *.apk *-SOURCE-*.zip > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
 
