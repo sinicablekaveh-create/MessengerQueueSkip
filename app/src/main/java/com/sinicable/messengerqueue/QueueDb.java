@@ -589,6 +589,46 @@ final class QueueDb {
         save(c,a);
     }
 
+    static synchronized void smsClearPending(Context c) {
+        JSONArray a=items(c);
+        for(int i=0;i<a.length();i++) {
+            JSONObject v=a.optJSONObject(i);
+            if(v==null)continue;
+            String state=v.optString("sms","blocked");
+            try {
+                if("pending".equals(state)) v.put("sms","cleared");
+                else if("in_flight".equals(state)) v.put("sms","review");
+            } catch(Exception ignored){}
+        }
+        save(c,a);
+        smsDue(c,0L);
+        log(c,"Pending SMS queue cleared; sent/delivery audit preserved");
+    }
+
+    static synchronized String smsSummary(Context c) {
+        JSONArray a=items(c);
+        int eligible=0,pending=0,submitted=0,delivered=0,failed=0,review=0,active=0,blocked=0,cleared=0;
+        for(int i=0;i<a.length();i++) {
+            JSONObject v=a.optJSONObject(i);
+            if(v==null)continue;
+            if(v.optBoolean("opt_in",false)&&v.optBoolean("send_sms",false))eligible++;
+            String state=v.optString("sms","blocked");
+            if("pending".equals(state))pending++;
+            else if("submitted".equals(state))submitted++;
+            else if("delivered".equals(state))delivered++;
+            else if("failed".equals(state))failed++;
+            else if("review".equals(state))review++;
+            else if("in_flight".equals(state))active++;
+            else if("cleared".equals(state))cleared++;
+            else blocked++;
+        }
+        return "SMS rows: "+a.length()+" | eligible: "+eligible+
+                "\nPending: "+pending+" | Active: "+active+
+                "\nSubmitted: "+submitted+" | Delivered: "+delivered+
+                "\nFailed: "+failed+" | Review: "+review+
+                "\nBlocked: "+blocked+" | Cleared: "+cleared;
+    }
+
     static synchronized void smsTerminal(Context c,String rowId,String state,String detail) {
         JSONArray a=items(c);
         JSONObject v=find(a,rowId);
