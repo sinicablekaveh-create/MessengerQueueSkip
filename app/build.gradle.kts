@@ -9,8 +9,8 @@ android {
         minSdk = 26
         ndk { abiFilters.add("arm64-v8a") }
         targetSdk = 35
-        versionCode = 32
-        versionName = "5.3.1"
+        versionCode = 33
+        versionName = "5.4.0"
     }
 
     buildFeatures { buildConfig = true }
@@ -25,8 +25,8 @@ android {
         }
         create("rubika") {
             dimension = "channel"
-            applicationId = "com.sinicable.threeib.rubika"
-            manifestPlaceholders["appLabel"] = "THREE IB • Rubika"
+            applicationId = "com.sinicable.threeib.rubika.simple"
+            manifestPlaceholders["appLabel"] = "THREE IB • Rubika Simple"
             buildConfigField("String", "TARGET_CHANNEL", "\"rubika\"")
         }
         create("eitaa") {
