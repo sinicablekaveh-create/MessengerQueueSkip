@@ -262,12 +262,25 @@ final class RecipientImportParser {
     private static Document parseXml(byte[] bytes) throws Exception {
         DocumentBuilderFactory f=DocumentBuilderFactory.newInstance();
         f.setNamespaceAware(true);
-        f.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);
-        f.setFeature("http://xml.org/sax/features/external-general-entities",false);
-        f.setFeature("http://xml.org/sax/features/external-parameter-entities",false);
-        f.setXIncludeAware(false);
+
+        // Android XML parser implementations differ by OS/vendor. Unsupported
+        // hardening features must not make an otherwise valid XLSX unreadable.
+        try {f.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING,true);}
+        catch(Exception ignored){}
+        try {f.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);}
+        catch(Exception ignored){}
+        try {f.setFeature("http://xml.org/sax/features/external-general-entities",false);}
+        catch(Exception ignored){}
+        try {f.setFeature("http://xml.org/sax/features/external-parameter-entities",false);}
+        catch(Exception ignored){}
+        try {f.setXIncludeAware(false);}
+        catch(UnsupportedOperationException ignored){}
         f.setExpandEntityReferences(false);
-        return f.newDocumentBuilder().parse(new ByteArrayInputStream(bytes));
+
+        javax.xml.parsers.DocumentBuilder builder=f.newDocumentBuilder();
+        builder.setEntityResolver((publicId,systemId)->
+                new org.xml.sax.InputSource(new java.io.StringReader("")));
+        return builder.parse(new ByteArrayInputStream(bytes));
     }
 
     static String phone(String raw) {
