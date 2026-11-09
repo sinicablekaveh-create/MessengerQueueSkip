@@ -125,12 +125,37 @@ public final class DirectQueueService extends Service {
                     String recipient=GatewayClient.normalizedPhone(QueueDb.phone(this,index));
                     if(recipient.isEmpty()){
                         QueueDb.status(this,index,provider,"failed");
+                        QueueDb.put(this,"direct_service_state",
+                                provider+": skipped one invalid recipient; continuing");
+                        nextWait=Math.min(nextWait,1000L);
                         continue;
                     }
                     String content=QueueDb.get(this,"direct_text","");
                     JSONObject row=QueueDb.items(this).optJSONObject(index);
                     if(row!=null&&!row.optString("message","").isEmpty())
                         content=row.optString("message","");
+
+                    JSONObject resolvedPeer=null;
+                    if("rubika".equals(provider)){
+                        try {
+                            resolvedPeer=RubikaPeerResolver.resolve(this,alias,instance,recipient,
+                                    row==null?"THREE IB":row.optString("name","THREE IB"));
+                        } catch(RubikaPeerResolver.ResolveException error) {
+                            if(error.terminal) {
+                                QueueDb.status(this,index,provider,"failed");
+                                QueueDb.put(this,"direct_service_state",
+                                        "rubika: skipped one recipient without a usable user GUID");
+                                nextWait=Math.min(nextWait,1200L);
+                            } else {
+                                pauseProvider(provider,"Recipient GUID resolution unavailable");
+                            }
+                            continue;
+                        } catch(Exception error) {
+                            pauseProvider(provider,"Recipient GUID resolution error");
+                            continue;
+                        }
+                    }
+
                     boolean picture="1".equals(QueueDb.get(this,"direct_image_enabled","0"));
                     File image=new File(getFilesDir(),"direct-image");
                     if(content.trim().isEmpty()&&(!picture||!image.isFile())){
@@ -154,10 +179,14 @@ public final class DirectQueueService extends Service {
                         GatewayClient.Reply reply;
                         if(picture){
                             String mime=QueueDb.get(this,"direct_image_mime","image/jpeg");
-                            reply=GatewayClient.sendImage(this,alias,instance,key,recipient,content,image,mime);
+                            if("rubika".equals(provider))
+                                reply=GatewayClient.sendImagePeer(this,alias,instance,key,resolvedPeer,content,image,mime);
+                            else
+                                reply=GatewayClient.sendImage(this,alias,instance,key,recipient,content,image,mime);
                         }else{
                             JSONObject payload=new JSONObject();
-                            payload.put("phone",recipient);
+                            if("rubika".equals(provider)) payload.put("peer",resolvedPeer);
+                            else payload.put("phone",recipient);
                             payload.put("message",content);
                             reply=GatewayClient.call(this,"POST","/send/message",
                                 payload,alias,instance,key);
@@ -195,22 +224,30 @@ public final class DirectQueueService extends Service {
                         if(lock.isHeld())lock.release();
                     }
                     QueueDb.directFinish(this,index,provider,state,sendId);
-                    if(!"submitted".equals(state)){
-                        pauseProvider(provider,"Send "+state+"; manual review required");
-                    }else{
+                    if("submitted".equals(state)){
                         QueueDb.due(this,provider,System.currentTimeMillis()
                             +QueueDb.delayMinutes(this,provider)*60_000L);
                         QueueDb.put(this,"direct_service_state","Gateway accepted "+provider+
                             " operation; this is not a delivery receipt.");
+                    }else if("failed".equals(state)){
+                        // A deterministic recipient/provider rejection must not hold the entire
+                        // consented queue hostage. Keep it terminal and continue with the next row.
+                        QueueDb.due(this,provider,System.currentTimeMillis()+2000L);
+                        QueueDb.put(this,"direct_service_state",
+                                provider+": one recipient failed; continuing to next row");
+                    }else{
+                        // REVIEW/unknown may already have been submitted. Pause to prevent duplicates.
+                        pauseProvider(provider,"Send "+state+"; manual review required");
                     }
-                    // Respect all selected app-specific intervals.
+                    // Respect the configured interval after successful sends. Failed rows get
+                    // only a short anti-hammer delay; ambiguous REVIEW pauses the provider.
                     break;
                 }
                 if(!selectedPending){
                     QueueDb.put(this,"direct_service_state","All selected queues completed");
                     break;
                 }
-                if(running.get()&&!submitted)Thread.sleep(Math.min(30_000,Math.max(1500,nextWait)));
+                if(running.get()&&!submitted)Thread.sleep(Math.min(30_000,Math.max(750,nextWait)));
             }
         }catch(InterruptedException ignored){
             Thread.currentThread().interrupt();

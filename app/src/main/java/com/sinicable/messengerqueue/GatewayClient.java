@@ -96,6 +96,44 @@ final class GatewayClient {
         } finally {conn.disconnect();}
     }
 
+    static Reply sendImagePeer(Context context,String alias,String instance,String idem,
+                               JSONObject peer,String caption,File image,String mime)throws Exception {
+        if (peer==null || !"user".equals(peer.optString("type")) || peer.optString("id","").isEmpty())
+            throw new IllegalArgumentException("Rubika user peer is required");
+        if (!image.isFile() || image.length()>6_000_000L)
+            throw new IllegalArgumentException("Image missing or over 6 MB");
+        final String auth = EmbeddedGatewayService.credential(context);
+        if (auth.isEmpty()) throw new IllegalStateException("Local gateway unavailable");
+        HttpURLConnection conn = open(context,"POST","/send/image",auth,alias,instance,idem);
+        String boundary="THREEIB"+UUID.randomUUID().toString().replace("-","");
+        conn.setDoOutput(true);
+        conn.setChunkedStreamingMode(65536);
+        conn.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);
+        try {
+            try(OutputStream out=conn.getOutputStream()){
+                formJson(out,boundary,"peer",peer.toString());
+                formValue(out,boundary,"caption",caption==null?"":caption);
+                String ext = "image/png".equals(mime) ? "png" : "jpg";
+                write(out,"--"+boundary+"\r\n");
+                write(out,"Content-Disposition: form-data; name=\"image\"; filename=\"threeib."+ext+"\"\r\n");
+                write(out,"Content-Type: "+("image/png".equals(mime)?"image/png":"image/jpeg")+"\r\n\r\n");
+                try(InputStream input=new FileInputStream(image)){
+                    byte[] buf = new byte[32768];int count;
+                    while((count=input.read(buf))!=-1)out.write(buf,0,count);
+                }
+                write(out,"\r\n--"+boundary+"--\r\n");
+            }
+            return read(conn);
+        } finally {conn.disconnect();}
+    }
+
+    private static void formJson(OutputStream out,String boundary,String name,String json)throws Exception {
+        write(out,"--"+boundary+"\r\nContent-Disposition: form-data; name=\""+name+"\"\r\n");
+        write(out,"Content-Type: application/json\r\n\r\n");
+        write(out,json);
+        write(out,"\r\n");
+    }
+
     private static void formValue(OutputStream out,String boundary,String name,String value)throws Exception {
         write(out,"--"+boundary+"\r\nContent-Disposition: form-data; name=\""+name+"\"\r\n\r\n");
         write(out,value);
