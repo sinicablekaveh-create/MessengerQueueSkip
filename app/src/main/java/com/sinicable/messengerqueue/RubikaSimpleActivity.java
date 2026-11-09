@@ -311,7 +311,8 @@ public final class RubikaSimpleActivity extends Activity {
         try{startService(i);}catch(Exception ignored){}
         QueueDb.put(this,"direct_selected_rubika","0");
         QueueDb.put(this,"direct_running","0");
-        refreshQueue("STOP ثبت شد");
+        if(Looper.myLooper()==Looper.getMainLooper())refreshQueue("STOP ثبت شد");
+        else ui.post(()->refreshQueue("STOP ثبت شد"));
     }
     private void refreshQueue(String note){
         if(queueState!=null)queueState.setText(note+"\nدر انتظار: "+QueueDb.directCount(this,PROVIDER,"pending")+
