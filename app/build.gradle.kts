@@ -9,8 +9,8 @@ android {
         minSdk = 26
         ndk { abiFilters.add("arm64-v8a") }
         targetSdk = 35
-        versionCode = 30
-        versionName = "5.2.0"
+        versionCode = 31
+        versionName = "5.3.0"
     }
 
     buildFeatures { buildConfig = true }
@@ -43,8 +43,8 @@ android {
         }
         create("sms") {
             dimension = "channel"
-            applicationId = "com.sinicable.threeib.sms"
-            manifestPlaceholders["appLabel"] = "THREE IB • SMS"
+            applicationId = "com.sinicable.threeib.sms.simple"
+            manifestPlaceholders["appLabel"] = "THREE IB • SMS Simple"
             buildConfigField("String", "TARGET_CHANNEL", "\"sms\"")
         }
         create("whatsapp") {
