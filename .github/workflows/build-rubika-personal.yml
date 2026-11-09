@@ -140,6 +140,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Rubika standalone artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: THREE-IB-RUBIKA-PERSONAL-v${{ env.VERSION_NAME }}-${{ env.BUILD_DATE }}
