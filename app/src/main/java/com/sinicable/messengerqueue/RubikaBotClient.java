@@ -4,6 +4,7 @@ import android.content.Context;
 import org.json.*;
 import java.io.*;
 import java.net.*;
+import javax.net.ssl.HttpsURLConnection;
 import java.nio.charset.StandardCharsets;
 
 final class RubikaBotClient {
