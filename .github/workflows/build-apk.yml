@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "ndk;28.0.13004108"
 
       - name: Build patched GoOmni ARM64 gateway for Rubika Independent
         shell: bash
@@ -55,7 +55,10 @@ jobs:
           go mod download
           go mod verify
           mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
-          GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"             -o "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so" .
+          NDK="$ANDROID_HOME/ndk/28.0.13004108"
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+          test -x "$CC"
+          GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC="$CC" go build -trimpath -ldflags="-s -w"             -o "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so" .
           test -s "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so"
           file "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so"
 
