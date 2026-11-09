@@ -131,16 +131,21 @@ public final class RubikaSimpleActivity extends Activity {
         return e.getClass().getSimpleName()+": "+(m.length()>140?m.substring(0,140):m);
     }
     private void waitForGateway() throws Exception {
-        for(int i=0;i<18;i++){
+        EmbeddedGatewayService.ensureStarted(this);
+        String last="";
+        for(int i=0;i<22;i++){
             if(!EmbeddedGatewayService.credential(this).isEmpty()){
                 try{
                     GatewayClient.Reply r=GatewayClient.call(this,"GET","/app/providers",null,null,null,null);
                     if(r.success())return;
-                }catch(Exception ignored){}
+                    last=r.summary();
+                }catch(Exception e){last=safeError(e);}
             }
-            Thread.sleep(650L);
+            String serviceError=getSharedPreferences("gateway",MODE_PRIVATE).getString("error","");
+            if(serviceError!=null&&!serviceError.isEmpty())last=serviceError;
+            Thread.sleep(550L);
         }
-        throw new IllegalStateException("درگاه محلی آماده نشد");
+        throw new IllegalStateException("درگاه روبیکا آماده نشد"+(last.isEmpty()?"":" | "+last));
     }
     private String instance(){return QueueDb.get(this,"direct_instance_rubika","");}
     private JSONObject account() throws Exception {
@@ -171,6 +176,8 @@ public final class RubikaSimpleActivity extends Activity {
     private void requestCode(){
         final String number=GatewayClient.normalizedPhone(phone.getText().toString());
         if(number.isEmpty()){toast("شماره معتبر وارد کن");return;}
+        accountState.setText("در حال راه‌اندازی درگاه و درخواست کد...");
+        toast("درخواست کد شروع شد");
         network("دریافت کد",()->{
             waitForGateway();
             String inst=provision();
@@ -182,8 +189,16 @@ public final class RubikaSimpleActivity extends Activity {
             JSONObject state=account();
             ui.post(()->showAccount(state));
             JSONObject challenge=state.optJSONObject("challenge");
-            if(challenge==null)return "درخواست ورود ثبت شد. auth="+state.optString("auth","?");
-            return "کد درخواست شد. روش دریافت: "+challenge.optString("delivery","نامشخص");
+            if(challenge==null){
+                ui.post(()->toast("درخواست ورود ثبت شد"));
+                return "درخواست ورود ثبت شد. auth="+state.optString("auth","?");
+            }
+            final String delivery=challenge.optString("delivery","نامشخص");
+            ui.post(()->{
+                accountState.setText("کد درخواست شد • روش دریافت: "+delivery);
+                toast("کد ورود درخواست شد");
+            });
+            return "کد درخواست شد. روش دریافت: "+delivery;
         });
     }
     private void verifyCode(){
