@@ -56,10 +56,18 @@ final class RecipientImportParser {
         if(stream==null)throw new IllegalArgumentException("File is not readable");
         String name=filename==null?"":filename.toLowerCase(Locale.ROOT);
         List<Map<String,String>> rows=name.endsWith(".xlsx")?xlsx(stream,smsDedicated):csv(stream,smsDedicated);
-        return normalize(rows,smsDedicated);
+        return normalize(rows,smsDedicated,smsDedicated);
     }
 
-    private static Result normalize(List<Map<String,String>> rows,boolean smsDedicated) {
+    /** Simple standalone channel: file provides recipients; START provides the explicit attestation. */
+    static Result readAttested(InputStream stream,String filename) throws Exception {
+        if(stream==null)throw new IllegalArgumentException("File is not readable");
+        String name=filename==null?"":filename.toLowerCase(Locale.ROOT);
+        List<Map<String,String>> rows=name.endsWith(".xlsx")?xlsx(stream,true):csv(stream,true);
+        return normalize(rows,true,false);
+    }
+
+    private static Result normalize(List<Map<String,String>> rows,boolean attestAtStart,boolean enableSms) {
         Result result=new Result();
         Set<String> seen=new HashSet<>();
         for(Map<String,String> row:rows) {
@@ -72,9 +80,9 @@ final class RecipientImportParser {
             // Standalone SMS-simple mode accepts the selected file as the user-managed recipient list.
             // START still requires an explicit on-screen attestation before any send begins.
             // Non-SMS imports preserve the previous two-column behavior.
-            boolean optIn=smsDedicated||twoColumn||truthy(row.get("opt_in"));
-            boolean sendSms=smsDedicated||truthy(row.get("send_sms"));
-            String source=smsDedicated
+            boolean optIn=attestAtStart||twoColumn||truthy(row.get("opt_in"));
+            boolean sendSms=enableSms||truthy(row.get("send_sms"));
+            String source=attestAtStart
                     ?"user-attestation-required-at-start"
                     :(twoColumn?"user-attestation-required-at-start":safe(row.get("opt_in_source")).trim());
             if(source.isEmpty())source="imported-row";
