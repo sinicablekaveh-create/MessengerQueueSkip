@@ -367,8 +367,10 @@ public final class RubikaSimpleActivity extends Activity {
 
         network("ارسال TEST ONE",()->{
             String ready=preflight();
+            JSONObject peer=RubikaPeerResolver.resolve(this,
+                    GatewayClient.alias(PROVIDER),instance(),recipient,"THREE IB TEST");
             JSONObject payload=new JSONObject();
-            payload.put("phone",recipient);
+            payload.put("peer",peer);
             payload.put("message",body);
             String idem="rubika-test-"+UUID.randomUUID();
             GatewayClient.Reply reply=GatewayClient.call(this,"POST","/send/message",
