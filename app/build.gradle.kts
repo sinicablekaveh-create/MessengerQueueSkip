@@ -9,8 +9,8 @@ android {
         minSdk = 26
         ndk { abiFilters.add("arm64-v8a") }
         targetSdk = 35
-        versionCode = 41
-        versionName = "6.0.3"
+        versionCode = 42
+        versionName = "6.0.4"
     }
 
     buildFeatures { buildConfig = true }
