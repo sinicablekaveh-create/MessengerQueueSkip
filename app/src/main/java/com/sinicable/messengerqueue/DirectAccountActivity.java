@@ -314,15 +314,20 @@ public final class DirectAccountActivity extends Activity {
             if(!caps.success())throw new IllegalStateException(caps.summary());
             JSONArray operations=caps.resultArray();
             boolean contactResolve=false;
+            boolean contactResolveLive=false;
             if(operations!=null)for(int i=0;i<operations.length();i++){
                 JSONObject op=operations.optJSONObject(i);
                 if(op!=null&&"contacts.add".equals(op.optString("operation",""))
                         &&"mutation".equals(op.optString("mode",""))){
-                    contactResolve=true;break;
+                    contactResolve=true;
+                    contactResolveLive=hasLiveEvidence(op.optJSONObject("evidence"));
+                    break;
                 }
             }
             if(!contactResolve)
                 throw new IllegalStateException("Rubika contacts.add برای تبدیل شماره به شناسهٔ کاربر در دسترس نیست");
+            if(!contactResolveLive)
+                throw new IllegalStateException("Rubika contacts.add شاهد زندهٔ ثبت‌شدهٔ کافی ندارد");
             JSONObject accountBody=new JSONObject();
             GatewayClient.Reply accountInfo=GatewayClient.call(this,"POST",
                     "/operations/account.info",accountBody,alias,instance(provider),null);
