@@ -26,7 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Rubika Simple: personal-account login + Excel/CSV + text + delay + START. */
+/** Rubika Direct: personal-account login + Excel/CSV + text + delay + START. */
 public final class RubikaSimpleActivity extends Activity {
     private static final int PICK_CONTACTS=760;
     private static final String PROVIDER="rubika";
@@ -48,7 +48,7 @@ public final class RubikaSimpleActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
-        TextView title=label(root,"THREE IB • RUBIKA SIMPLE "+BuildConfig.VERSION_NAME,23);
+        TextView title=label(root,"THREE IB • RUBIKA DIRECT "+BuildConfig.VERSION_NAME,23);
         title.setTextColor(0xFF166346);
         label(root,"ورود حساب شخصی داخل خود APK، سپس Excel/CSV، متن، فاصله و START RUBIKA.",13);
 
@@ -101,7 +101,7 @@ public final class RubikaSimpleActivity extends Activity {
 
         button(root,"STOP",this::stopQueue);
         queueState=label(root,"",13);
-        footer=label(root,"درگاه حساب شخصی غیررسمی و محلی است. وضعیت Submitted به معنی تحویل/خوانده‌شدن قطعی نیست.",12);
+        footer=label(root,"Rubika Direct از درگاه محلی بازسازی‌شده استفاده می‌کند. Submitted به معنی تحویل/خوانده‌شدن قطعی نیست.",12);
 
         refreshImported();
         refreshQueue("آماده");
