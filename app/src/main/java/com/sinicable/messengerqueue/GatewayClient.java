@@ -2,6 +2,7 @@ package com.sinicable.messengerqueue;
 
 import android.content.Context;
 import android.util.Base64;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -21,6 +22,7 @@ final class GatewayClient {
         final JSONObject data;
         Reply(int http, JSONObject data){this.http=http;this.data=data;}
         JSONObject result(){return data.optJSONObject("results") == null ? new JSONObject() : data.optJSONObject("results");}
+        JSONArray resultArray(){return data.optJSONArray("results");}
         String state(){return result().optString("state","");}
         String code(){return data.optString("code","");}
         boolean success(){return http >= 200 && http < 300 && !"SEND_UNKNOWN".equals(code());}
