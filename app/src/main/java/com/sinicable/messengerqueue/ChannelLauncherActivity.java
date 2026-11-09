@@ -11,8 +11,10 @@ public final class ChannelLauncherActivity extends Activity {
         String channel = BuildConfig.TARGET_CHANNEL;
         Intent next;
         switch (channel) {
-            case "bale":
             case "rubika":
+                next = new Intent(this, RubikaOfficialActivity.class);
+                break;
+            case "bale":
             case "eitaa":
                 next = new Intent(this, DirectAccountActivity.class);
                 next.putExtra("fixed_provider", channel);

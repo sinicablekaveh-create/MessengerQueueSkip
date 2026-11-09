@@ -30,6 +30,7 @@
         <activity android:name=".TelegramActivity" android:exported="false"/>
         <activity android:name=".SmsOnlyActivity" android:exported="false"/>
         <activity android:name=".WhatsAppCloudActivity" android:exported="false"/>
+        <activity android:name=".RubikaOfficialActivity" android:exported="false"/>
 
         <service
             android:name=".EmbeddedGatewayService"
@@ -65,6 +66,15 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-started Telegram personal-account queue with visible controls"/>
+        </service>
+
+        <service
+            android:name=".RubikaBotQueueService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started official Rubika Bot API queue"/>
         </service>
 
         <service
