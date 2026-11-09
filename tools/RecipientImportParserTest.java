@@ -53,6 +53,12 @@ public final class RecipientImportParserTest {
         RecipientImportParser.Result smsPhoneOnly=RecipientImportParser.read(
                 new ByteArrayInputStream(phoneOnly.getBytes(StandardCharsets.UTF_8)),"phones.csv",true);
         check(smsPhoneOnly.recipients.size()==1,"SMS Simple accepts phone-only files");
+
+        RecipientImportParser.Result rubikaSimple=RecipientImportParser.readAttested(
+                new ByteArrayInputStream(priorReview.getBytes(StandardCharsets.UTF_8)),"rubika.csv");
+        check(rubikaSimple.recipients.size()==1,"Rubika Simple must read review-style files");
+        check(rubikaSimple.recipients.get(0).optIn,"Rubika Simple uses START attestation");
+        check(!rubikaSimple.recipients.get(0).sendSms,"Rubika Simple must not enable SIM SMS");
         boolean threw=false;
         try {
             RecipientImportParser.read(new ByteArrayInputStream(
