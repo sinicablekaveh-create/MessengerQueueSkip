@@ -9,6 +9,8 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
@@ -36,6 +38,13 @@ public final class SmsOnlyActivity extends Activity {
     private TextView sim;
     private CheckBox consent;
     private boolean pendingStart;
+    private final Handler statusHandler=new Handler(Looper.getMainLooper());
+    private final Runnable liveStatus=new Runnable(){
+        @Override public void run(){
+            refresh("وضعیت زنده SMS");
+            statusHandler.postDelayed(this,2000L);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -75,6 +84,15 @@ public final class SmsOnlyActivity extends Activity {
             QueueKeeperService.stop(this);
             refresh("صف متوقف شد؛ موارد ارسال‌نشده باقی می‌مانند.");
         });
+        button(root, "پاک‌کردن فقط پیامک‌های ارسال‌نشده", () -> new AlertDialog.Builder(this)
+                .setTitle("پاک‌کردن Pending SMS؟")
+                .setMessage("فقط موارد ارسال‌نشده پاک می‌شوند؛ Delivered، Failed و Review برای گزارش باقی می‌مانند.")
+                .setNegativeButton("لغو", null)
+                .setPositiveButton("پاک کن", (d, w) -> {
+                    QueueKeeperService.stop(this);
+                    QueueDb.smsClearPending(this);
+                    refresh("Pending SMS پاک شد؛ سابقه ارسال حفظ شد.");
+                }).show());
         button(root, "CLEAR ALL LOCAL QUEUE DATA", () -> new AlertDialog.Builder(this)
                 .setTitle("پاک‌کردن صف و مخاطبان؟")
                 .setMessage("اطلاعات صف محلی این اپ پاک می‌شود.")
@@ -149,6 +167,10 @@ public final class SmsOnlyActivity extends Activity {
     }
 
     private void chooseSim() {
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)) {
+            toast("این دستگاه قابلیت ارسال SMS سیم‌کارتی ندارد");
+            return;
+        }
         if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{android.Manifest.permission.READ_PHONE_STATE}, PERMISSIONS);
             return;
@@ -179,6 +201,10 @@ public final class SmsOnlyActivity extends Activity {
     }
 
     private void startSms() {
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)) {
+            toast("قابلیت Telephony Messaging روی این دستگاه موجود نیست");
+            return;
+        }
         if (!consent.isChecked()) { toast("تأیید رضایت گیرندگان ضروری است"); return; }
         String body = message.getText().toString().trim();
         if (body.isEmpty()) { toast("متن پیامک را وارد کن"); return; }
@@ -240,8 +266,18 @@ public final class SmsOnlyActivity extends Activity {
 
     private void refresh(String note) {
         if (sim != null) sim.setText("SIM: " + QueueDb.get(this, "sms_subscription_label", "انتخاب نشده"));
-        if (status != null) status.setText(note + "\n" + QueueDb.summary(this)
-                + "\nSMS eligible: " + QueueDb.smsEligibleCount(this));
+        if (status != null) status.setText(note + "\n" + QueueDb.smsSummary(this));
+    }
+
+    @Override protected void onStart(){
+        super.onStart();
+        statusHandler.removeCallbacks(liveStatus);
+        statusHandler.post(liveStatus);
+    }
+
+    @Override protected void onStop(){
+        statusHandler.removeCallbacks(liveStatus);
+        super.onStop();
     }
 
     private void toast(String value) {

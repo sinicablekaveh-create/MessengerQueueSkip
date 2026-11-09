@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Phone and SMS permissions are exclusive to the SMS APK. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Standalone SMS APK: no Internet/Accessibility/provider gateway dependency. -->
     <uses-permission android:name="android.permission.SEND_SMS"/>
     <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove"/>
+
+    <application>
+        <activity android:name=".DirectAccountActivity" tools:node="remove"/>
+        <activity android:name=".TelegramRecipientsActivity" tools:node="remove"/>
+        <activity android:name=".TelegramActivity" tools:node="remove"/>
+        <activity android:name=".WhatsAppCloudActivity" tools:node="remove"/>
+
+        <service android:name=".EmbeddedGatewayService" tools:node="remove"/>
+        <service android:name=".DirectQueueService" tools:node="remove"/>
+        <service android:name=".WhatsAppQueueService" tools:node="remove"/>
+        <service android:name=".TelegramQueueService" tools:node="remove"/>
+    </application>
 </manifest>
