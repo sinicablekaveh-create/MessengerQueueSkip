@@ -60,6 +60,8 @@ public final class RubikaSimpleActivity extends Activity {
         password=field(root,"رمز دومرحله‌ای، در صورت درخواست",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
         password.setSaveEnabled(false);
         button(root,"دریافت کد ورود",this::requestCode);
+        button(root,"ارسال مجدد کد",this::requestCode);
+        button(root,"باز کردن Rubika Web رسمی",this::openRubikaWeb);
         button(root,"تأیید کد و ورود",this::verifyCode);
         button(root,"ثبت رمز دومرحله‌ای",this::verifyPassword);
         button(root,"بررسی وضعیت حساب",this::refreshAccount);
@@ -123,7 +125,13 @@ public final class RubikaSimpleActivity extends Activity {
             String out;
             try{out=task.run();}catch(Exception e){out="خطا: "+safeError(e);}
             final String result=out;
-            ui.post(()->footer.setText(result));
+            ui.post(()->{
+                footer.setText(result);
+                if(result.startsWith("خطا:")) {
+                    if(accountState!=null)accountState.setText(result);
+                    toast(result);
+                }
+            });
         });
     }
     private static String safeError(Exception e){
@@ -173,6 +181,15 @@ public final class RubikaSimpleActivity extends Activity {
         QueueDb.put(this,"direct_instance_rubika",inst);
         return inst;
     }
+    private void openRubikaWeb(){
+        try {
+            Intent i=new Intent(Intent.ACTION_VIEW,Uri.parse("https://web.rubika.ir/"));
+            startActivity(i);
+        } catch(Exception e) {
+            toast("باز کردن Rubika Web ممکن نشد");
+        }
+    }
+
     private void requestCode(){
         final String number=GatewayClient.normalizedPhone(phone.getText().toString());
         if(number.isEmpty()){toast("شماره معتبر وارد کن");return;}
@@ -190,15 +207,38 @@ public final class RubikaSimpleActivity extends Activity {
             ui.post(()->showAccount(state));
             JSONObject challenge=state.optJSONObject("challenge");
             if(challenge==null){
-                ui.post(()->toast("درخواست ورود ثبت شد"));
-                return "درخواست ورود ثبت شد. auth="+state.optString("auth","?");
+                final String auth=state.optString("auth","?");
+                ui.post(()->{
+                    accountState.setText("درخواست ثبت شد ولی challenge فعال برنگشت • auth="+auth);
+                    toast("چالش ورود از روبیکا دریافت نشد");
+                });
+                return "درخواست ثبت شد ولی challenge فعال برنگشت • auth="+auth;
             }
-            final String delivery=challenge.optString("delivery","نامشخص");
+
+            final String delivery=challenge.optString("delivery","unknown");
+            final String humanDelivery;
+            if("sms".equalsIgnoreCase(delivery)) humanDelivery="SMS";
+            else if("app".equalsIgnoreCase(delivery)) humanDelivery="داخل خود اپ روبیکا";
+            else if("call".equalsIgnoreCase(delivery)) humanDelivery="تماس تلفنی";
+            else humanDelivery="نامشخص";
+
+            final int resend=challenge.optInt("resend_after_seconds",-1);
+            final String challengeState=challenge.optString("state","?");
+            final String detail="روش دریافت: "+humanDelivery+
+                    " | state="+challengeState+
+                    (resend>=0 ? " | ارسال مجدد بعد از "+resend+" ثانیه" : "");
+
             ui.post(()->{
-                accountState.setText("کد درخواست شد • روش دریافت: "+delivery);
-                toast("کد ورود درخواست شد");
+                accountState.setText(detail);
+                if("app".equalsIgnoreCase(delivery))
+                    toast("کد را داخل خود برنامه روبیکا بررسی کن");
+                else if("sms".equalsIgnoreCase(delivery))
+                    toast("روبیکا اعلام کرده کد با SMS ارسال می‌شود");
+                else if("call".equalsIgnoreCase(delivery))
+                    toast("روبیکا اعلام کرده کد با تماس ارسال می‌شود");
+                else toast("روش تحویل کد نامشخص است");
             });
-            return "کد درخواست شد. روش دریافت: "+delivery;
+            return detail;
         });
     }
     private void verifyCode(){
