@@ -13,6 +13,8 @@ import android.os.PowerManager;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -137,6 +139,22 @@ public final class DirectQueueService extends Service {
                         pauseProvider(provider,"No message content");
                         continue;
                     }
+                    JSONObject peer=null;
+                    if("rubika".equals(provider)){
+                        try{
+                            peer=resolveRubikaPeer(recipient,alias,instance);
+                        }catch(Exception error){
+                            pauseProvider(provider,"Recipient resolution unavailable: "+safeIssue(error));
+                            running.set(false);
+                            break;
+                        }
+                        if(peer==null){
+                            QueueDb.status(this,index,provider,"failed");
+                            QueueDb.put(this,"direct_service_state",
+                                    "Rubika recipient could not be resolved from the imported phone number");
+                            continue;
+                        }
+                    }
                     String key=QueueDb.directBegin(this,index,provider);
                     if(key.isEmpty()){
                         pauseProvider(provider,"Could not persist send attempt");
@@ -154,10 +172,12 @@ public final class DirectQueueService extends Service {
                         GatewayClient.Reply reply;
                         if(picture){
                             String mime=QueueDb.get(this,"direct_image_mime","image/jpeg");
-                            reply=GatewayClient.sendImage(this,alias,instance,key,recipient,content,image,mime);
+                            reply=GatewayClient.sendImage(this,alias,instance,key,peer,recipient,
+                                    content,image,mime);
                         }else{
                             JSONObject payload=new JSONObject();
-                            payload.put("phone",recipient);
+                            if(peer!=null) payload.put("peer",peer);
+                            else payload.put("phone",recipient);
                             payload.put("message",content);
                             reply=GatewayClient.call(this,"POST","/send/message",
                                 payload,alias,instance,key);
@@ -191,6 +211,8 @@ public final class DirectQueueService extends Service {
                         // Unresolved queues, unknown, 409/429, 5xx and timeout remain REVIEW.
                     }catch(Exception error){
                         state="review";
+                        QueueDb.put(this,"direct_service_state",
+                                provider+" send error: "+safeIssue(error));
                     }finally{
                         if(lock.isHeld())lock.release();
                     }
@@ -222,6 +244,74 @@ public final class DirectQueueService extends Service {
             worker=null;
             stopSelf();
         }
+    }
+
+    private JSONObject resolveRubikaPeer(String phone,String alias,String instance)throws Exception {
+        String resolveKey="threeib-rubika-contact-"+stableRecipientKey(instance+"|"+phone);
+        JSONObject contact=new JSONObject();
+        contact.put("phone",phone);
+        contact.put("first_name","THREE IB");
+        GatewayClient.Reply reply=GatewayClient.call(this,"POST","/operations/contacts.add",
+                contact,alias,instance,resolveKey);
+        String phase=reply.result().optString("state","");
+        String operationId=reply.result().optString("send_id","");
+        if(reply.success() && ("queued".equals(phase)||"sending".equals(phase))
+                && !operationId.isEmpty()){
+            for(int check=0;check<8&&running.get();check++){
+                Thread.sleep(1500L);
+                GatewayClient.Reply current=GatewayClient.call(this,"GET",
+                        "/send/operations/"+operationId,null,alias,instance,null);
+                reply=current;
+                phase=current.result().optString("state","");
+                if("succeeded".equals(phase)||"failed".equals(phase)
+                        ||"unknown".equals(phase))break;
+            }
+        }
+        if(!reply.success() || !"succeeded".equals(reply.result().optString("state",""))){
+            if(reply.http>=400&&reply.http<500&&reply.http!=409&&reply.http!=429)
+                return null;
+            throw new IllegalStateException(reply.summary());
+        }
+        JSONObject operationResult=reply.result().optJSONObject("result");
+        JSONObject data=operationResult==null?null:operationResult.optJSONObject("data");
+        if(data==null&&operationResult!=null){
+            Object raw=operationResult.opt("data");
+            if(raw instanceof String){
+                try{data=new JSONObject((String)raw);}catch(Exception ignored){}
+            }
+        }
+        String guid="";
+        if(data!=null){
+            JSONObject user=data.optJSONObject("user");
+            if(user!=null)guid=user.optString("user_guid","");
+            if(guid.isEmpty())guid=data.optString("user_guid","");
+        }
+        if(!guid.matches("^u0[A-Za-z0-9]{1,126}$"))return null;
+        JSONObject peer=new JSONObject();
+        peer.put("type","user");
+        peer.put("id",guid);
+        return peer;
+    }
+
+    private static String stableRecipientKey(String value){
+        try{
+            byte[] digest=MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder out=new StringBuilder();
+            for(int i=0;i<12;i++)
+                out.append(String.format(java.util.Locale.US,"%02x",digest[i]));
+            return out.toString();
+        }catch(Exception ignored){
+            return Integer.toHexString(value.hashCode());
+        }
+    }
+
+    private static String safeIssue(Exception error){
+        String message=error.getMessage();
+        if(message==null||message.trim().isEmpty())return error.getClass().getSimpleName();
+        message=message.replaceAll("[\r\n]+"," ").trim();
+        if(message.length()>120)message=message.substring(0,120);
+        return message;
     }
 
     private void pauseProvider(String provider,String message){

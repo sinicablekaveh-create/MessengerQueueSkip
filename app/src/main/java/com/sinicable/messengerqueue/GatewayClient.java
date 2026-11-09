@@ -68,7 +68,7 @@ final class GatewayClient {
     }
 
     static Reply sendImage(Context context,String alias,String instance,String idem,
-                           String phone,String caption,File image,String mime)throws Exception {
+                           JSONObject peer,String phone,String caption,File image,String mime)throws Exception {
         if (!image.isFile() || image.length()>6_000_000L)
             throw new IllegalArgumentException("Image missing or over 6 MB");
         final String auth = EmbeddedGatewayService.credential(context);
@@ -80,7 +80,8 @@ final class GatewayClient {
         conn.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);
         try {
             try(OutputStream out=conn.getOutputStream()){
-                formValue(out,boundary,"phone",phone);
+                if(peer!=null) formValue(out,boundary,"peer",peer.toString());
+                else formValue(out,boundary,"phone",phone);
                 formValue(out,boundary,"caption",caption);
                 String ext = "image/png".equals(mime) ? "png" : "jpg";
                 write(out,"--"+boundary+"\r\n");
