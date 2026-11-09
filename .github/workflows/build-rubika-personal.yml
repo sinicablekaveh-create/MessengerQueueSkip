@@ -49,9 +49,11 @@ jobs:
           git clone --depth 1 --branch v2.4.1 https://github.com/mimalef70/goomni.git "$RUNNER_TEMP/goomni"
           cd "$RUNNER_TEMP/goomni"
           python3 "$GITHUB_WORKSPACE/tools/patch-goomni-rubika-v6.py"
+          gofmt -w src/internal/rubikameow/client.go src/infrastructure/mediafile/manager.go
           cd src
           go mod download
           go mod verify
+          go test ./infrastructure/mediafile
           mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
           NDK="$ANDROID_HOME/ndk/28.0.13004108"
           CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
