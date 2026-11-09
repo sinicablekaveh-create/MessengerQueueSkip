@@ -131,6 +131,27 @@ public final class DirectQueueService extends Service {
                     JSONObject row=QueueDb.items(this).optJSONObject(index);
                     if(row!=null&&!row.optString("message","").isEmpty())
                         content=row.optString("message","");
+
+                    JSONObject resolvedPeer=null;
+                    if("rubika".equals(provider)){
+                        try {
+                            resolvedPeer=RubikaPeerResolver.resolve(this,alias,instance,recipient,
+                                    row==null?"THREE IB":row.optString("name","THREE IB"));
+                        } catch(RubikaPeerResolver.ResolveException error) {
+                            if(error.terminal) {
+                                QueueDb.status(this,index,provider,"failed");
+                                QueueDb.put(this,"direct_service_state",
+                                        "rubika: recipient is not resolvable to a user GUID");
+                            } else {
+                                pauseProvider(provider,"Recipient GUID resolution unavailable");
+                            }
+                            continue;
+                        } catch(Exception error) {
+                            pauseProvider(provider,"Recipient GUID resolution error");
+                            continue;
+                        }
+                    }
+
                     boolean picture="1".equals(QueueDb.get(this,"direct_image_enabled","0"));
                     File image=new File(getFilesDir(),"direct-image");
                     if(content.trim().isEmpty()&&(!picture||!image.isFile())){
@@ -157,7 +178,8 @@ public final class DirectQueueService extends Service {
                             reply=GatewayClient.sendImage(this,alias,instance,key,recipient,content,image,mime);
                         }else{
                             JSONObject payload=new JSONObject();
-                            payload.put("phone",recipient);
+                            if("rubika".equals(provider)) payload.put("peer",resolvedPeer);
+                            else payload.put("phone",recipient);
                             payload.put("message",content);
                             reply=GatewayClient.call(this,"POST","/send/message",
                                 payload,alias,instance,key);
