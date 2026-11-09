@@ -60,6 +60,9 @@ jobs:
       - name: Verify two-column and legacy recipient imports
         run: bash tools/test-recipient-import.sh
 
+      - name: Verify Rubika Official chat_id consent imports
+        run: bash tools/test-rubika-bot-import.sh
+
       - name: Compile six independent APK flavors
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 
@@ -70,7 +73,7 @@ jobs:
           mkdir -p dist
           declare -A PKG
           PKG[bale]="com.sinicable.threeib.bale"
-          PKG[rubika]="com.sinicable.threeib.rubika"
+          PKG[rubika]="com.sinicable.threeib.rubika.official"
           PKG[eitaa]="com.sinicable.threeib.eitaa"
           PKG[telegram]="com.sinicable.threeib.telegram"
           PKG[sms]="com.sinicable.threeib.sms"
@@ -102,7 +105,7 @@ jobs:
               ! grep -Fq "uses-permission: name='android.permission.READ_PHONE_STATE'" <<< "$badging"
             fi
             manifest_tree="$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump xmltree --file AndroidManifest.xml "$apk")"
-            if [[ "$channel" == "bale" || "$channel" == "rubika" || "$channel" == "eitaa" ]]; then
+            if [[ "$channel" == "bale" || "$channel" == "eitaa" ]]; then
               grep -Fq "android:usesCleartextTraffic" <<< "$manifest_tree"
               unzip -Z1 "$apk" | grep -Fx 'lib/arm64-v8a/libgoomni.so' >/dev/null
             else
@@ -118,7 +121,14 @@ jobs:
               echo "Commit: $GITHUB_SHA"
               echo "Signing: GitHub Actions debug signature; not stable production signing."
               case "$channel" in
-                bale|rubika|eitaa)
+                rubika)
+                  echo "Mode: OFFICIAL Rubika Bot API v3 over HTTPS only."
+                  echo "Auth: BotFather token encrypted with Android Keystore; validated by getMe."
+                  echo "Recipients: opted-in chat_id values from getUpdates StartedBot//start or Excel/CSV chat_id,opt_in=true."
+                  echo "Queue: persistent START/STOP, per-recipient sendMessage, retry up to 3 times."
+                  echo "No personal-account OTP, no private Rubika protocol, no localhost gateway."
+                  ;;
+                bale|eitaa)
                   echo "Account mode: phone + OTP + optional 2FA inside APK through bundled localhost GoOmni gateway."
                   echo "No installed messenger application is launched or screen-controlled."
                   echo "Provider implementation is unofficial and live account delivery is not asserted by this build."
