@@ -267,7 +267,9 @@ public final class DirectQueueService extends Service {
                         ||"unknown".equals(phase))break;
             }
         }
-        if(!reply.success() || !"succeeded".equals(reply.result().optString("state",""))){
+        String finalPhase=reply.result().optString("state","");
+        if("failed".equals(finalPhase))return null;
+        if(!reply.success() || !"succeeded".equals(finalPhase)){
             if(reply.http>=400&&reply.http<500&&reply.http!=409&&reply.http!=429)
                 return null;
             throw new IllegalStateException(reply.summary());
