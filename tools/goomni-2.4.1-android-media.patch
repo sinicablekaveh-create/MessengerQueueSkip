@@ -1,0 +1,59 @@
+diff --git a/src/infrastructure/mediafile/manager.go b/src/infrastructure/mediafile/manager.go
+index 5fc5613..ae4f6e7 100644
+--- a/src/infrastructure/mediafile/manager.go
++++ b/src/infrastructure/mediafile/manager.go
+@@ -193,15 +193,29 @@ func (u *Upload) Publish() error {
+ 		return err
+ 	}
+ 	// Link publishes without replacing any existing file, including a symlink.
+-	if err := os.Link(filepath.Join(u.dir, "data"), filepath.Join(dir, u.v.MediaID)); err != nil {
+-		return errors.New("media file cannot be published")
++	// Some Android app-private filesystems reject link(2) with EPERM. In that
++	// environment atomically move the owned staging file with RENAME_NOREPLACE;
++	// this preserves the same collision guarantee without requiring hard links.
++	source := filepath.Join(u.dir, "data")
++	target := filepath.Join(dir, u.v.MediaID)
++	moved := false
++	if err := os.Link(source, target); err != nil {
++		if moveErr := unix.Renameat2(unix.AT_FDCWD, source, unix.AT_FDCWD, target, unix.RENAME_NOREPLACE); moveErr != nil {
++			return errors.New("media file cannot be published")
++		}
++		moved = true
+ 	}
+ 	if err := syncDirectory(dir); err != nil {
+ 		return err
+ 	}
+-	// Retain the staging hard link until cleanup. It proves that an unregistered
+-	// final file is ours even after a crash, and protects an unexpected collision
+-	// when publication failed without replacing the existing destination.
++	if moved {
++		if err := syncDirectory(u.dir); err != nil {
++			return err
++		}
++	}
++	// A hard link retains the staging inode as proof. The Android fallback moves
++	// that exact owned inode atomically, so an absent staging file plus the durable
++	// intent proves the final file was published by this upload.
+ 	return nil
+ }
+ 
+@@ -332,11 +346,15 @@ func (m *Manager) cleanup(ctx context.Context, id string) error {
+ 	}
+ 	if !registered {
+ 		if finalExists {
+-			dataInfo, dataErr := os.Lstat(dataPath)
+-			finalInfo, finalErr := os.Lstat(final)
+-			if !dataExists || dataErr != nil || finalErr != nil || !os.SameFile(dataInfo, finalInfo) {
+-				return errors.New("unregistered media ownership cannot be verified")
++			if dataExists {
++				dataInfo, dataErr := os.Lstat(dataPath)
++				finalInfo, finalErr := os.Lstat(final)
++				if dataErr != nil || finalErr != nil || !os.SameFile(dataInfo, finalInfo) {
++					return errors.New("unregistered media ownership cannot be verified")
++				}
+ 			}
++			// With the Android RENAME_NOREPLACE fallback the staging data is absent
++			// only after the exact owned file has atomically become this final path.
+ 			if err = os.Remove(final); err != nil {
+ 				return err
+ 			}

@@ -272,12 +272,22 @@ public final class DirectQueueService extends Service {
                 return null;
             throw new IllegalStateException(reply.summary());
         }
-        JSONObject operationResult=reply.result().optJSONObject("result");
-        JSONObject data=operationResult==null?null:operationResult.optJSONObject("data");
-        if(data==null&&operationResult!=null){
-            Object raw=operationResult.opt("data");
+        JSONObject results=reply.result();
+        JSONObject data=results.optJSONObject("data");
+        if(data==null){
+            Object raw=results.opt("data");
             if(raw instanceof String){
                 try{data=new JSONObject((String)raw);}catch(Exception ignored){}
+            }
+        }
+        if(data==null){
+            JSONObject operationResult=results.optJSONObject("result");
+            data=operationResult==null?null:operationResult.optJSONObject("data");
+            if(data==null&&operationResult!=null){
+                Object raw=operationResult.opt("data");
+                if(raw instanceof String){
+                    try{data=new JSONObject((String)raw);}catch(Exception ignored){}
+                }
             }
         }
         String guid="";
