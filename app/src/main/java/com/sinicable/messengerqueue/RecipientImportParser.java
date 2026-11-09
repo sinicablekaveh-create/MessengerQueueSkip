@@ -66,13 +66,17 @@ final class RecipientImportParser {
             String phone=phone(row.get("phone"));
             if(phone.isEmpty()) {result.invalidRows++;continue;}
             if(!seen.add(phone)) {result.duplicateRows++;continue;}
+            boolean twoColumn=row.containsKey("name")&&!row.containsKey("opt_in");
             String contactName=safe(row.get("name")).trim();
             if(contactName.isEmpty())contactName="بدون نام";
             // Standalone SMS-simple mode accepts the selected file as the user-managed recipient list.
             // START still requires an explicit on-screen attestation before any send begins.
-            boolean optIn=smsDedicated||truthy(row.get("opt_in"));
+            // Non-SMS imports preserve the previous two-column behavior.
+            boolean optIn=smsDedicated||twoColumn||truthy(row.get("opt_in"));
             boolean sendSms=smsDedicated||truthy(row.get("send_sms"));
-            String source=smsDedicated?"user-attestation-required-at-start":safe(row.get("opt_in_source")).trim();
+            String source=smsDedicated
+                    ?"user-attestation-required-at-start"
+                    :(twoColumn?"user-attestation-required-at-start":safe(row.get("opt_in_source")).trim());
             if(source.isEmpty())source="imported-row";
             if(!optIn)result.blockedRows++;
             result.recipients.add(new Recipient(contactName,phone,optIn,source,sendSms,safe(row.get("message"))));
