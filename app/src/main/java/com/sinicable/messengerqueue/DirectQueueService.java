@@ -165,6 +165,7 @@ public final class DirectQueueService extends Service {
                             "Submitting one "+provider+" recipient (private)");
                     String state="review";
                     String sendId="";
+                    String providerMessageId="";
                     PowerManager.WakeLock lock=((PowerManager)getSystemService(POWER_SERVICE))
                             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"threeib:direct-send");
                     lock.acquire(75_000L);
@@ -183,11 +184,12 @@ public final class DirectQueueService extends Service {
                                 payload,alias,instance,key);
                         }
                         sendId=reply.result().optString("send_id","");
+                        providerMessageId=reply.result().optString("message_id","");
                         // HTTP 200/202 does not establish send success: inspect operation state.
                         if(reply.success()){
                             String phase=reply.result().optString("state","");
                             if("succeeded".equals(phase)) {
-                                state="submitted";
+                                state=confirmedSendIdentity(provider,providerMessageId)?"submitted":"review";
                             } else if("failed".equals(phase)) {
                                 state="failed";
                             } else if(("queued".equals(phase) || "sending".equals(phase))
@@ -198,8 +200,13 @@ public final class DirectQueueService extends Service {
                                     GatewayClient.Reply checkReply=GatewayClient.call(this,"GET",
                                         "/send/operations/"+sendId,null,alias,instance,null);
                                     if(!checkReply.success()) break;
-                                    phase=checkReply.result().optString("state","");
-                                    if("succeeded".equals(phase)){state="submitted";break;}
+                                    JSONObject checked=checkReply.result();
+                                    phase=checked.optString("state","");
+                                    if("succeeded".equals(phase)){
+                                        providerMessageId=checked.optString("message_id","");
+                                        state=confirmedSendIdentity(provider,providerMessageId)?"submitted":"review";
+                                        break;
+                                    }
                                     if("failed".equals(phase)){state="failed";break;}
                                     if("unknown".equals(phase))break;
                                 }
@@ -222,8 +229,9 @@ public final class DirectQueueService extends Service {
                     }else{
                         QueueDb.due(this,provider,System.currentTimeMillis()
                             +QueueDb.delayMinutes(this,provider)*60_000L);
-                        QueueDb.put(this,"direct_service_state","Gateway accepted "+provider+
-                            " operation; this is not a delivery receipt.");
+                        QueueDb.put(this,"direct_service_state","Gateway verified "+provider+
+                            " operation"+(providerMessageId.isEmpty()?"":" message_id="+providerMessageId)+
+                            "; this is not a delivery receipt.");
                     }
                     // Respect all selected app-specific intervals.
                     break;
@@ -301,6 +309,17 @@ public final class DirectQueueService extends Service {
         peer.put("type","user");
         peer.put("id",guid);
         return peer;
+    }
+
+    private static boolean confirmedSendIdentity(String provider,String messageId){
+        if(!"rubika".equals(provider))return true;
+        if(messageId==null||messageId.isEmpty()||messageId.length()>19)return false;
+        try{
+            long parsed=Long.parseLong(messageId);
+            return parsed>0 && Long.toString(parsed).equals(messageId);
+        }catch(Exception ignored){
+            return false;
+        }
     }
 
     private static String stableRecipientKey(String value){
