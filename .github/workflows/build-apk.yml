@@ -1,3 +1,5 @@
+[Reading 219 lines from start (total: 219 lines, 0 remaining)]
+
 name: Build SIX separate THREE IB APKs and sources
 on:
   push:
@@ -27,6 +29,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.9'
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -37,6 +43,23 @@ jobs:
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build patched GoOmni Android ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          GOOMNI_DIR="$RUNNER_TEMP/goomni-2.4.1"
+          git clone --filter=blob:none https://github.com/mimalef70/goomni.git "$GOOMNI_DIR"
+          git -C "$GOOMNI_DIR" checkout a49bd704ef513ff70269dcea985f486fa0a6d1a7
+          git -C "$GOOMNI_DIR" apply "$GITHUB_WORKSPACE/tools/goomni-2.4.1-android-media.patch"
+          (
+            cd "$GOOMNI_DIR/src"
+            go test -tags purego ./infrastructure/mediafile
+            CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -tags purego -trimpath \
+              -o "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so" .
+          )
+          test -s app/src/main/jniLibs/arm64-v8a/libgoomni.so
+          sha256sum app/src/main/jniLibs/arm64-v8a/libgoomni.so
 
       - name: Read version
         shell: bash
@@ -196,3 +219,5 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 7
+
+[executed on device: localhost (1528558a-1f26-4bd3-891b-a056ea3e197e)]
