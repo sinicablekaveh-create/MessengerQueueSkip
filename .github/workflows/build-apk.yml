@@ -70,7 +70,7 @@ jobs:
           mkdir -p dist
           declare -A PKG
           PKG[bale]="com.sinicable.threeib.bale"
-          PKG[rubika]="com.sinicable.threeib.rubika"
+          PKG[rubika]="com.sinicable.threeib.rubika.simple"
           PKG[eitaa]="com.sinicable.threeib.eitaa"
           PKG[telegram]="com.sinicable.threeib.telegram"
           PKG[sms]="com.sinicable.threeib.sms.simple"
@@ -118,7 +118,13 @@ jobs:
               echo "Commit: $GITHUB_SHA"
               echo "Signing: GitHub Actions debug signature; not stable production signing."
               case "$channel" in
-                bale|rubika|eitaa)
+                rubika)
+                  echo "Account mode: Rubika Simple personal login with phone + OTP + optional 2FA through bundled localhost GoOmni gateway."
+                  echo "UI: Excel/CSV replaces queue, text, interval, START RUBIKA, STOP."
+                  echo "No installed Rubika application is launched or screen-controlled."
+                  echo "Provider implementation is unofficial and live account delivery is not asserted by this build."
+                  ;;
+                bale|eitaa)
                   echo "Account mode: phone + OTP + optional 2FA inside APK through bundled localhost GoOmni gateway."
                   echo "No installed messenger application is launched or screen-controlled."
                   echo "Provider implementation is unofficial and live account delivery is not asserted by this build."
