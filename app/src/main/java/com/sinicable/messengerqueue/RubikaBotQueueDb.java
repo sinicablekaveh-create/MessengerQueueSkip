@@ -54,5 +54,4 @@ final class RubikaBotQueueDb extends SQLiteOpenHelper {
     static void put(Context c,String k,String v){p(c).edit().putString(k,v).apply();}
     static String get(Context c,String k,String d){return p(c).getString(k,d);}
     static long getLong(Context c,String k,long d){try{return Long.parseLong(get(c,k,String.valueOf(d)));}catch(Exception e){return d;}}
-    private RubikaBotQueueDb(){}
 }
