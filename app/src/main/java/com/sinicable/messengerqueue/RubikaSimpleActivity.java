@@ -163,6 +163,17 @@ public final class RubikaSimpleActivity extends Activity {
         if(!r.success())throw new IllegalStateException(r.summary());
         return r.result();
     }
+
+    /** GoOmni login contract: state is top-level; challenge carries delivery/timing metadata. */
+    private JSONObject loginState() throws Exception {
+        String inst=instance();
+        if(inst.isEmpty())throw new IllegalStateException("حساب روبیکا هنوز provision نشده");
+        GatewayClient.Reply r=GatewayClient.call(this,"GET",
+                "/devices/"+GatewayClient.alias(PROVIDER)+"/login",
+                null,GatewayClient.alias(PROVIDER),inst,null);
+        if(!r.success())throw new IllegalStateException(r.summary());
+        return r.result();
+    }
     private String provision() throws Exception {
         String saved=instance();
         if(!saved.isEmpty())return saved;
@@ -203,40 +214,54 @@ public final class RubikaSimpleActivity extends Activity {
                     body,GatewayClient.alias(PROVIDER),inst,null);
             if(!r.success())throw new IllegalStateException(r.summary());
             QueueDb.put(this,"direct_phone_rubika",number);
-            JSONObject state=account();
-            ui.post(()->showAccount(state));
-            JSONObject challenge=state.optJSONObject("challenge");
+
+            JSONObject login=loginState();
+            JSONObject challenge=login.optJSONObject("challenge");
+            final String loginStateValue=login.optString("state","unknown");
+
+            JSONObject status=account();
+            ui.post(()->showAccount(status));
+
             if(challenge==null){
-                final String auth=state.optString("auth","?");
+                final String detail="state="+loginStateValue+" | challenge ندارد";
                 ui.post(()->{
-                    accountState.setText("درخواست ثبت شد ولی challenge فعال برنگشت • auth="+auth);
-                    toast("چالش ورود از روبیکا دریافت نشد");
+                    accountState.setText(detail);
+                    toast("وضعیت ورود: "+loginStateValue);
                 });
-                return "درخواست ثبت شد ولی challenge فعال برنگشت • auth="+auth;
+                return detail;
             }
 
             final String delivery=challenge.optString("delivery","unknown");
+            final String nextDelivery=challenge.optString("next_delivery","");
+            final String available=challenge.optJSONArray("available_deliveries")==null
+                    ? "" : challenge.optJSONArray("available_deliveries").toString();
+            final String expiresAt=challenge.optString("expires_at","");
+            final String resendAt=challenge.optString("resend_available_at","");
+            final String masked=challenge.optString("masked_phone","");
+
             final String humanDelivery;
             if("sms".equalsIgnoreCase(delivery)) humanDelivery="SMS";
             else if("app".equalsIgnoreCase(delivery)) humanDelivery="داخل خود اپ روبیکا";
             else if("call".equalsIgnoreCase(delivery)) humanDelivery="تماس تلفنی";
-            else humanDelivery="نامشخص";
+            else humanDelivery=delivery.isEmpty()?"نامشخص":delivery;
 
-            final int resend=challenge.optInt("resend_after_seconds",-1);
-            final String challengeState=challenge.optString("state","?");
-            final String detail="روش دریافت: "+humanDelivery+
-                    " | state="+challengeState+
-                    (resend>=0 ? " | ارسال مجدد بعد از "+resend+" ثانیه" : "");
+            final String detail="STATE="+loginStateValue+
+                    " | دریافت="+humanDelivery+
+                    (masked.isEmpty()?"":" | شماره="+masked)+
+                    (nextDelivery.isEmpty()?"":" | بعدی="+nextDelivery)+
+                    (available.isEmpty()?"":" | روش‌های موجود="+available)+
+                    (resendAt.isEmpty()?"":" | ارسال مجدد از "+resendAt)+
+                    (expiresAt.isEmpty()?"":" | انقضا "+expiresAt);
 
             ui.post(()->{
                 accountState.setText(detail);
                 if("app".equalsIgnoreCase(delivery))
                     toast("کد را داخل خود برنامه روبیکا بررسی کن");
                 else if("sms".equalsIgnoreCase(delivery))
-                    toast("روبیکا اعلام کرده کد با SMS ارسال می‌شود");
+                    toast("روبیکا: روش دریافت SMS");
                 else if("call".equalsIgnoreCase(delivery))
-                    toast("روبیکا اعلام کرده کد با تماس ارسال می‌شود");
-                else toast("روش تحویل کد نامشخص است");
+                    toast("روبیکا: روش دریافت تماس تلفنی");
+                else toast("STATE="+loginStateValue+" | delivery="+delivery);
             });
             return detail;
         });
@@ -247,9 +272,9 @@ public final class RubikaSimpleActivity extends Activity {
         code.setText("");
         network("تأیید کد",()->{
             waitForGateway();
-            JSONObject state=account();
-            JSONObject challenge=state.optJSONObject("challenge");
-            if(challenge==null)throw new IllegalStateException("چالش ورود فعال نیست");
+            JSONObject login=loginState();
+            JSONObject challenge=login.optJSONObject("challenge");
+            if(challenge==null)throw new IllegalStateException("چالش ورود فعال نیست • state="+login.optString("state","unknown"));
             JSONObject body=new JSONObject();
             body.put("challenge_id",challenge.optString("challenge_id",""));
             body.put("code",otp);
@@ -266,8 +291,9 @@ public final class RubikaSimpleActivity extends Activity {
         if(secret.isEmpty()){toast("رمز دومرحله‌ای را وارد کن");return;}
         password.setText("");
         network("تأیید رمز",()->{
-            JSONObject challenge=account().optJSONObject("challenge");
-            if(challenge==null)throw new IllegalStateException("چالش رمز فعال نیست");
+            JSONObject login=loginState();
+            JSONObject challenge=login.optJSONObject("challenge");
+            if(challenge==null)throw new IllegalStateException("چالش رمز فعال نیست • state="+login.optString("state","unknown"));
             JSONObject body=new JSONObject();
             body.put("challenge_id",challenge.optString("challenge_id",""));
             body.put("password",secret);
@@ -280,8 +306,18 @@ public final class RubikaSimpleActivity extends Activity {
     }
     private void refreshAccount(){
         network("بررسی حساب",()->{
-            waitForGateway();JSONObject state=account();ui.post(()->showAccount(state));
-            return "Rubika auth="+state.optString("auth","?")+" | transport="+state.optString("transport","?");
+            waitForGateway();
+            JSONObject state=account();
+            JSONObject login=loginState();
+            ui.post(()->{
+                showAccount(state);
+                accountState.setText("LOGIN STATE="+login.optString("state","unknown")+
+                        " | auth="+state.optString("auth","?")+
+                        " | transport="+state.optString("transport","?"));
+            });
+            return "Rubika login="+login.optString("state","unknown")+
+                    " | auth="+state.optString("auth","?")+
+                    " | transport="+state.optString("transport","?");
         });
     }
     private void showAccount(JSONObject state){
