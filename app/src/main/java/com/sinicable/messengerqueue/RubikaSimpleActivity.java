@@ -20,21 +20,23 @@ import android.widget.Toast;
 
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Rubika Simple: personal-account login + Excel/CSV + text + delay + START. */
+/** Rubika Personal: phone/OTP login + Excel/CSV + text/image + interval + TEST + START. */
 public final class RubikaSimpleActivity extends Activity {
-    private static final int PICK_CONTACTS=760;
+    private static final int PICK_CONTACTS=760, PICK_IMAGE=761;
     private static final String PROVIDER="rubika";
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final Handler ui=new Handler(Looper.getMainLooper());
 
     private EditText phone,code,password,message,minutes,testPhone;
-    private CheckBox confirmation,testOwned;
+    private CheckBox confirmation,testOwned,useImage;
     private TextView accountState,imported,queueState,preflightState,footer;
 
     @Override public void onCreate(Bundle state){
@@ -50,7 +52,7 @@ public final class RubikaSimpleActivity extends Activity {
 
         TextView title=label(root,"THREE IB • RUBIKA SIMPLE "+BuildConfig.VERSION_NAME,23);
         title.setTextColor(0xFF166346);
-        label(root,"ورود حساب شخصی داخل خود APK، سپس Excel/CSV، متن، فاصله و START RUBIKA.",13);
+        label(root,"ورود حساب شخصی داخل خود APK، Excel/CSV، متن/عکس، فاصله و START RUBIKA.",13);
 
         label(root,"1) ورود حساب روبیکا",18);
         phone=field(root,"شماره حساب، مانند 0912...",InputType.TYPE_CLASS_PHONE);
@@ -77,6 +79,12 @@ public final class RubikaSimpleActivity extends Activity {
         message=field(root,"متن پیام روبیکا",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setMinLines(4);
         message.setText(QueueDb.get(this,"direct_text",""));
+        button(root,"انتخاب تصویر اختیاری (JPG/PNG)",this::pickImage);
+        useImage=new CheckBox(this);
+        useImage.setText("ارسال تصویر انتخاب‌شده همراه پیام");
+        useImage.setChecked("1".equals(QueueDb.get(this,"direct_image_enabled","0"))
+                && new File(getFilesDir(),"direct-image").isFile());
+        root.addView(useImage);
         minutes=field(root,"فاصله بین ارسال‌ها، ۱ تا ۱۴۴۰ دقیقه",InputType.TYPE_CLASS_NUMBER);
         minutes.setText(String.valueOf(QueueDb.delayMinutes(this,PROVIDER)));
 
@@ -99,7 +107,8 @@ public final class RubikaSimpleActivity extends Activity {
         start.setOnClickListener(v->startQueue());
         root.addView(start);
 
-        button(root,"STOP",this::stopQueue);
+        button(root,"PAUSE / STOP",this::stopQueue);
+        button(root,"CLEAR PENDING • پاک‌کردن موارد ارسال‌نشده",this::clearPending);
         queueState=label(root,"",13);
         footer=label(root,"درگاه حساب شخصی غیررسمی و محلی است. وضعیت Submitted به معنی تحویل/خوانده‌شدن قطعی نیست.",12);
 
@@ -363,18 +372,28 @@ public final class RubikaSimpleActivity extends Activity {
         final String recipient=GatewayClient.normalizedPhone(testPhone.getText().toString());
         if(recipient.isEmpty()){toast("شماره تستی معتبر وارد کن");return;}
         final String body=message.getText().toString().trim();
-        if(body.isEmpty()){toast("متن پیام را وارد کن");return;}
+        final boolean picture=useImage!=null&&useImage.isChecked();
+        final File image=new File(getFilesDir(),"direct-image");
+        if(body.isEmpty()&&!picture){toast("متن یا تصویر را وارد کن");return;}
+        if(picture&&!image.isFile()){toast("ابتدا تصویر را انتخاب کن");return;}
 
         network("ارسال TEST ONE",()->{
             String ready=preflight();
             JSONObject peer=RubikaPeerResolver.resolve(this,
                     GatewayClient.alias(PROVIDER),instance(),recipient,"THREE IB TEST");
-            JSONObject payload=new JSONObject();
-            payload.put("peer",peer);
-            payload.put("message",body);
             String idem="rubika-test-"+UUID.randomUUID();
-            GatewayClient.Reply reply=GatewayClient.call(this,"POST","/send/message",
-                    payload,GatewayClient.alias(PROVIDER),instance(),idem);
+            GatewayClient.Reply reply;
+            if(picture){
+                String mime=QueueDb.get(this,"direct_image_mime","image/jpeg");
+                reply=GatewayClient.sendImagePeer(this,GatewayClient.alias(PROVIDER),
+                        instance(),idem,peer,body,image,mime);
+            }else{
+                JSONObject payload=new JSONObject();
+                payload.put("peer",peer);
+                payload.put("message",body);
+                reply=GatewayClient.call(this,"POST","/send/message",
+                        payload,GatewayClient.alias(PROVIDER),instance(),idem);
+            }
             if(!reply.success())throw new IllegalStateException(reply.summary());
 
             String state=reply.result().optString("state","");
@@ -405,29 +424,60 @@ public final class RubikaSimpleActivity extends Activity {
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","text/csv","text/plain"});
         startActivityForResult(i,PICK_CONTACTS);
     }
+    private void pickImage(){
+        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("image/*");
+        startActivityForResult(i,PICK_IMAGE);
+    }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(request!=PICK_CONTACTS||result!=RESULT_OK||data==null||data.getData()==null)return;
+        if(result!=RESULT_OK||data==null||data.getData()==null)return;
         final Uri uri=data.getData();
-        network("خواندن مخاطبان",()->{
-            String name=fileName(uri);
-            String lower=name.toLowerCase(Locale.ROOT);
-            if(!lower.endsWith(".xlsx")&&!lower.endsWith(".csv"))
-                throw new IllegalArgumentException("فقط XLSX یا CSV");
-            RecipientImportParser.Result parsed;
-            try(InputStream input=getContentResolver().openInputStream(uri)){
-                parsed=RecipientImportParser.readAttested(input,name);
+        if(request==PICK_CONTACTS){
+            network("خواندن مخاطبان",()->{
+                String name=fileName(uri);
+                String lower=name.toLowerCase(Locale.ROOT);
+                if(!lower.endsWith(".xlsx")&&!lower.endsWith(".csv"))
+                    throw new IllegalArgumentException("فقط XLSX یا CSV");
+                RecipientImportParser.Result parsed;
+                try(InputStream input=getContentResolver().openInputStream(uri)){
+                    parsed=RecipientImportParser.readAttested(input,name);
+                }
+                if(parsed.recipients.isEmpty())throw new IllegalArgumentException("شماره معتبر پیدا نشد");
+                stopQueue();
+                QueueDb.clear(getApplicationContext());
+                int added=QueueDb.append(getApplicationContext(),parsed);
+                QueueDb.put(this,"rubika_file_name",name);
+                QueueDb.put(this,"rubika_file_invalid",String.valueOf(parsed.invalidRows));
+                QueueDb.put(this,"rubika_file_duplicates",String.valueOf(parsed.duplicateRows));
+                ui.post(()->{confirmation.setChecked(false);refreshImported();refreshQueue("فایل جدید جایگزین صف قبلی شد");});
+                return added+" شماره معتبر روبیکا آماده شد";
+            });
+        }else if(request==PICK_IMAGE){
+            final String mime=getContentResolver().getType(uri);
+            if(!"image/jpeg".equals(mime)&&!"image/png".equals(mime)){
+                toast("فعلاً فقط JPG و PNG پشتیبانی می‌شود");return;
             }
-            if(parsed.recipients.isEmpty())throw new IllegalArgumentException("شماره معتبر پیدا نشد");
-            stopQueue();
-            QueueDb.clear(getApplicationContext());
-            int added=QueueDb.append(getApplicationContext(),parsed);
-            QueueDb.put(this,"rubika_file_name",name);
-            QueueDb.put(this,"rubika_file_invalid",String.valueOf(parsed.invalidRows));
-            QueueDb.put(this,"rubika_file_duplicates",String.valueOf(parsed.duplicateRows));
-            ui.post(()->{confirmation.setChecked(false);refreshImported();refreshQueue("فایل جدید جایگزین صف قبلی شد");});
-            return added+" شماره معتبر روبیکا آماده شد";
-        });
+            network("ذخیره تصویر",()->{
+                File dest=new File(getFilesDir(),"direct-image");
+                long size=0;
+                try(InputStream input=getContentResolver().openInputStream(uri);
+                    FileOutputStream output=new FileOutputStream(dest)){
+                    if(input==null)throw new IllegalStateException("تصویر قابل خواندن نیست");
+                    byte[] buf=new byte[32768];int n;
+                    while((n=input.read(buf))!=-1){
+                        size+=n;
+                        if(size>6_000_000L)throw new IllegalArgumentException("تصویر بیشتر از ۶ مگابایت است");
+                        output.write(buf,0,n);
+                    }
+                }catch(Exception error){dest.delete();throw error;}
+                QueueDb.put(this,"direct_image_mime",mime);
+                QueueDb.put(this,"direct_image_enabled","1");
+                ui.post(()->useImage.setChecked(true));
+                return "تصویر آماده شد: "+size+" بایت";
+            });
+        }
     }
     private String fileName(Uri uri){
         String name="contacts.xlsx";
@@ -451,7 +501,11 @@ public final class RubikaSimpleActivity extends Activity {
         if(!confirmation.isChecked()){toast("تأیید رضایت گیرندگان لازم است");return;}
         if(QueueDb.items(this).length()==0){toast("ابتدا Excel / CSV را انتخاب کن");return;}
         final String text=message.getText().toString().trim();
-        if(text.isEmpty()){toast("متن پیام را وارد کن");return;}
+        final boolean image=useImage!=null&&useImage.isChecked();
+        if(text.isEmpty()&&!image){toast("متن یا تصویر را وارد کن");return;}
+        if(image&&!new File(getFilesDir(),"direct-image").isFile()){
+            toast("ابتدا تصویر را انتخاب کن");return;
+        }
         int delay;
         try{delay=Integer.parseInt(minutes.getText().toString().trim());}catch(Exception e){delay=0;}
         if(delay<1||delay>1440){toast("فاصله باید ۱ تا ۱۴۴۰ دقیقه باشد");return;}
@@ -461,7 +515,7 @@ public final class RubikaSimpleActivity extends Activity {
             ui.post(()->preflightState.setText("آمادگی: "+ready));
 
             QueueDb.put(this,"direct_text",text);
-            QueueDb.put(this,"direct_image_enabled","0");
+            QueueDb.put(this,"direct_image_enabled",image?"1":"0");
             QueueDb.put(this,"delay_rubika",String.valueOf(selectedDelay));
             QueueDb.put(this,"direct_selected_bale","0");
             QueueDb.put(this,"direct_selected_rubika","1");
@@ -482,6 +536,11 @@ public final class RubikaSimpleActivity extends Activity {
         QueueDb.put(this,"direct_running","0");
         if(Looper.myLooper()==Looper.getMainLooper())refreshQueue("STOP ثبت شد");
         else ui.post(()->refreshQueue("STOP ثبت شد"));
+    }
+    private void clearPending(){
+        stopQueue();
+        QueueDb.directClearPending(this,PROVIDER);
+        refreshQueue("موارد ارسال‌نشده پاک شدند؛ Submitted/Review حفظ شد");
     }
     private void refreshQueue(String note){
         if(queueState!=null)queueState.setText(note+"\nدر انتظار: "+QueueDb.directCount(this,PROVIDER,"pending")+
