@@ -94,7 +94,7 @@ jobs:
           mkdir -p dist
           declare -A PKG
           PKG[bale]="com.sinicable.threeib.bale"
-          PKG[rubika]="com.sinicable.threeib.rubika.independent"
+          PKG[rubika]="com.sinicable.threeib.rubika.guidfix"
           PKG[eitaa]="com.sinicable.threeib.eitaa"
           PKG[telegram]="com.sinicable.threeib.telegram"
           PKG[sms]="com.sinicable.threeib.sms.simple"
@@ -143,8 +143,8 @@ jobs:
               echo "Signing: GitHub Actions debug signature; not stable production signing."
               case "$channel" in
                 rubika)
-                  echo "Account mode: Rubika Independent personal login with phone + OTP + optional 2FA through a CI-rebuilt patched GoOmni v2.4.1 gateway."
-                  echo "Discovery: current Rubika GET discovery first, legacy POST fallback; dedicated package/storage/port."\n                  echo "UI: Excel/CSV replaces queue, text, interval, CHECK READY, TEST ONE, START RUBIKA, STOP."
+                  echo "Account mode: Rubika Personal GUID Fix; phone + OTP + optional 2FA through a CI-rebuilt patched GoOmni v2.4.1 gateway."
+                  echo "Destination mode: phone is resolved to Rubika user_guid before send; dedicated package/storage/port."\n                  echo "UI: Excel/CSV replaces queue, text, interval, CHECK READY, TEST ONE, START RUBIKA, STOP."
                   echo "No installed Rubika application is launched or screen-controlled."
                   echo "Provider implementation is unofficial and live account delivery is not asserted by this build."
                   ;;
