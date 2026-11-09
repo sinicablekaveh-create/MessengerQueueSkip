@@ -81,7 +81,7 @@ public final class DirectAccountActivity extends Activity {
         code.setSaveEnabled(false);
         password=field(column,"رمز دومرحله‌ای (فقط در صورت درخواست)",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
         password.setSaveEnabled(false);
-        button(column,"دریافت کد ورود",this::requestCode);
+        button(column,"شروع ورود / دریافت کد",this::requestCode);
         button(column,"تأیید کد و ورود",this::verifyCode);
         button(column,"ثبت رمز دومرحله‌ای",this::verifyPassword);
         button(column,"بررسی وضعیت حساب",this::refreshAccount);
@@ -225,6 +225,93 @@ public final class DirectAccountActivity extends Activity {
         if(!response.success())throw new IllegalStateException(response.summary());
         return response.result();
     }
+
+    private JSONObject loginState(String provider)throws Exception{
+        String alias=GatewayClient.alias(provider);
+        String inst=instance(provider);
+        if(inst.isEmpty())throw new IllegalStateException("حساب هنوز ساخته نشده است");
+        GatewayClient.Reply response=GatewayClient.call(this,"GET",
+                "/devices/"+alias+"/login",null,alias,inst,null);
+        if(!response.success())throw new IllegalStateException(response.summary());
+        return response.result();
+    }
+
+    private String loginStepText(JSONObject state){
+        String phase=state.optString("state","");
+        JSONObject challenge=state.optJSONObject("challenge");
+        if(challenge==null)challenge=state;
+        String delivery=challenge.optString("delivery","نامشخص");
+        if("authenticated".equals(phase))return "ورود حساب کامل شد.";
+        if("awaiting_code".equals(phase))
+            return "کد تأیید لازم است. روش تحویل: "+delivery+" | کد را وارد و «تأیید کد و ورود» را بزن.";
+        if("awaiting_password".equals(phase))
+            return "رمز دومرحله‌ای لازم است. رمز را وارد و «ثبت رمز دومرحله‌ای» را بزن.";
+        return "مرحلهٔ ورود: "+(phase.isEmpty()?"نامشخص":phase);
+    }
+
+    private JSONObject currentChallenge(String provider,String expectedState)throws Exception{
+        JSONObject state=loginState(provider);
+        String phase=state.optString("state","");
+        if("authenticated".equals(phase))
+            throw new IllegalStateException("حساب قبلاً وارد شده است");
+        if(!expectedState.equals(phase))
+            throw new IllegalStateException(loginStepText(state));
+        JSONObject challenge=state.optJSONObject("challenge");
+        if(challenge==null||challenge.optString("challenge_id","").isEmpty())
+            throw new IllegalStateException("شناسهٔ چالش ورود در دسترس نیست");
+        return challenge;
+    }
+
+    private static boolean contains(JSONArray values,String wanted){
+        if(values==null)return false;
+        for(int i=0;i<values.length();i++)if(wanted.equals(values.optString(i)))return true;
+        return false;
+    }
+
+    private void assertProviderReady(String provider,String text,boolean image)throws Exception{
+        GatewayClient.Reply reply=GatewayClient.call(this,"GET","/app/providers",null,null,null,null);
+        if(!reply.success())throw new IllegalStateException(reply.summary());
+        JSONArray providers=reply.resultArray();
+        if(providers==null)throw new IllegalStateException("فهرست قابلیت‌های پیام‌رسان در دسترس نیست");
+        JSONObject descriptor=null;
+        for(int i=0;i<providers.length();i++){
+            JSONObject row=providers.optJSONObject(i);
+            if(row!=null&&provider.equals(row.optString("id",""))){descriptor=row;break;}
+        }
+        if(descriptor==null||!descriptor.optBoolean("enabled",false))
+            throw new IllegalStateException("درگاه "+provider+" در این ساخت فعال نیست");
+        JSONObject send=descriptor.optJSONObject("send");
+        JSONArray kinds=send==null?null:send.optJSONArray("kinds");
+        if(!text.trim().isEmpty()&&!contains(kinds,"text"))
+            throw new IllegalStateException(provider+" در این ساخت ارسال متن را اعلام نکرده است");
+        if(image&&!contains(kinds,"image"))
+            throw new IllegalStateException(provider+" در این ساخت ارسال تصویر را اعلام نکرده است");
+        if(send!=null){
+            int maxChars=send.optInt("max_text_characters",0);
+            if(maxChars>0&&text.codePointCount(0,text.length())>maxChars)
+                throw new IllegalStateException("متن از سقف "+maxChars+" کاراکتر "+provider+" بیشتر است");
+            int maxBytes=send.optInt("max_text_bytes",0);
+            if(maxBytes>0&&text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>maxBytes)
+                throw new IllegalStateException("متن از سقف بایتی "+provider+" بیشتر است");
+        }
+        if("rubika".equals(provider)){
+            String alias=GatewayClient.alias(provider);
+            GatewayClient.Reply caps=GatewayClient.call(this,"GET",
+                    "/devices/"+alias+"/capabilities",null,alias,instance(provider),null);
+            if(!caps.success())throw new IllegalStateException(caps.summary());
+            JSONArray operations=caps.resultArray();
+            boolean contactResolve=false;
+            if(operations!=null)for(int i=0;i<operations.length();i++){
+                JSONObject op=operations.optJSONObject(i);
+                if(op!=null&&"contacts.add".equals(op.optString("operation",""))
+                        &&"mutation".equals(op.optString("mode",""))){
+                    contactResolve=true;break;
+                }
+            }
+            if(!contactResolve)
+                throw new IllegalStateException("Rubika contacts.add برای تبدیل شماره به شناسهٔ کاربر در دسترس نیست");
+        }
+    }
     private String provision(String provider)throws Exception{
         String saved=instance(provider);
         if(!saved.isEmpty())return saved;
@@ -248,7 +335,7 @@ public final class DirectAccountActivity extends Activity {
         final String provider=selected;
         final String number=GatewayClient.normalizedPhone(phone.getText().toString());
         if(number.isEmpty()){toast("شماره معتبر وارد کن");return;}
-        network("دریافت کد "+provider,()->{
+        network("شروع ورود "+provider,()->{
             waitForGateway();
             String inst=provision(provider);
             JSONObject body=new JSONObject();body.put("phone",number);
@@ -257,11 +344,12 @@ public final class DirectAccountActivity extends Activity {
                 GatewayClient.alias(provider),inst,null);
             if(!reply.success())throw new IllegalStateException(reply.summary());
             QueueDb.put(this,"direct_phone_"+provider,number);
-            JSONObject state=account(provider);
-            JSONObject challenge=state.optJSONObject("challenge");
-            if(challenge==null) return "درخواست ورود ثبت شد. وضعیت: "+state.optString("auth","نامشخص");
-            return "درخواست کد ثبت شد. روش تحویل: "+challenge.optString("delivery","نامشخص")
-                +" | کد را در همین صفحه وارد کن.";
+            JSONObject challenge=reply.result();
+            String id=challenge.optString("challenge_id","");
+            String phase=challenge.optString("state","");
+            if(id.isEmpty()&&!"authenticated".equals(phase))
+                throw new IllegalStateException("پاسخ ورود شناسهٔ چالش نداشت");
+            return loginStepText(challenge);
         });
     }
 
@@ -272,18 +360,18 @@ public final class DirectAccountActivity extends Activity {
         code.setText("");
         network("تأیید کد",()->{
             waitForGateway();
-            JSONObject state=account(provider);
-            JSONObject challenge=state.optJSONObject("challenge");
-            if(challenge==null)throw new IllegalStateException("چالش ورود فعال نیست");
-            String id=challenge.optString("challenge_id","");
-            if(id.isEmpty())throw new IllegalStateException("شناسهٔ چالش وجود ندارد");
-            JSONObject body=new JSONObject();body.put("challenge_id",id);body.put("code",otp);
+            JSONObject challenge=currentChallenge(provider,"awaiting_code");
+            JSONObject body=new JSONObject();
+            body.put("challenge_id",challenge.optString("challenge_id",""));
+            body.put("code",otp);
             GatewayClient.Reply reply=GatewayClient.call(this,"POST",
                 "/devices/"+GatewayClient.alias(provider)+"/login/code",body,
                 GatewayClient.alias(provider),instance(provider),null);
-            if(!reply.success())throw new IllegalStateException(reply.summary());
-            return "نتیجهٔ ورود: "+account(provider).optString("auth","نامشخص")
-                +" | در صورت درخواست، رمز دومرحله‌ای را ثبت کن.";
+            if(!reply.success()&&!"PASSWORD_REQUIRED".equals(reply.code()))
+                throw new IllegalStateException(reply.summary());
+            if(reply.success()&&"authenticated".equals(reply.result().optString("auth","")))
+                return "ورود حساب کامل شد؛ حساب آمادهٔ START است.";
+            return loginStepText(loginState(provider));
         });
     }
 
@@ -293,8 +381,8 @@ public final class DirectAccountActivity extends Activity {
         if(secret.isEmpty()){toast("رمز دومرحله‌ای را وارد کن");return;}
         password.setText("");
         network("تأیید رمز دومرحله‌ای",()->{
-            JSONObject challenge=account(provider).optJSONObject("challenge");
-            if(challenge==null)throw new IllegalStateException("چالش رمز فعال نیست");
+            waitForGateway();
+            JSONObject challenge=currentChallenge(provider,"awaiting_password");
             JSONObject payload=new JSONObject();
             payload.put("challenge_id",challenge.optString("challenge_id",""));
             payload.put("password",secret);
@@ -302,7 +390,9 @@ public final class DirectAccountActivity extends Activity {
                     "/devices/"+GatewayClient.alias(provider)+"/login/password",
                     payload,GatewayClient.alias(provider),instance(provider),null);
             if(!reply.success())throw new IllegalStateException(reply.summary());
-            return "وضعیت ورود: "+account(provider).optString("auth","نامشخص");
+            if("authenticated".equals(reply.result().optString("auth","")))
+                return "ورود حساب کامل شد؛ حساب آمادهٔ START است.";
+            return loginStepText(loginState(provider));
         });
     }
 
@@ -408,6 +498,7 @@ public final class DirectAccountActivity extends Activity {
                    !"connected".equals(state.optString("transport"))){
                     throw new IllegalStateException("حساب "+LABELS[i]+" وارد نشده: "+state.optString("auth"));
                 }
+                assertProviderReady(p,text,image);
             }
             Intent service=new Intent(this,DirectQueueService.class);
             service.setAction(DirectQueueService.ACTION_START);
