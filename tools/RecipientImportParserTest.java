@@ -40,6 +40,19 @@ public final class RecipientImportParserTest {
         RecipientImportParser.Result sms=RecipientImportParser.read(
                 new ByteArrayInputStream(simple.getBytes(StandardCharsets.UTF_8)),"names.csv",true);
         check(sms.recipients.get(0).sendSms,"standalone SMS enables selection");
+
+        String priorReview="name,phone,opt_in,send_sms\n"+
+                "مخاطب تست,09124440000,false,false\n";
+        RecipientImportParser.Result smsReview=RecipientImportParser.read(
+                new ByteArrayInputStream(priorReview.getBytes(StandardCharsets.UTF_8)),"review.csv",true);
+        check(smsReview.recipients.size()==1,"SMS Simple must read review-style files");
+        check(smsReview.recipients.get(0).optIn,"SMS Simple uses START attestation instead of file opt_in");
+        check(smsReview.recipients.get(0).sendSms,"SMS Simple enables selected rows after START attestation");
+
+        String phoneOnly="phone\n09125550123\n";
+        RecipientImportParser.Result smsPhoneOnly=RecipientImportParser.read(
+                new ByteArrayInputStream(phoneOnly.getBytes(StandardCharsets.UTF_8)),"phones.csv",true);
+        check(smsPhoneOnly.recipients.size()==1,"SMS Simple accepts phone-only files");
         boolean threw=false;
         try {
             RecipientImportParser.read(new ByteArrayInputStream(
