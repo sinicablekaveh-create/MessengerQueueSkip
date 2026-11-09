@@ -125,6 +125,9 @@ public final class DirectQueueService extends Service {
                     String recipient=GatewayClient.normalizedPhone(QueueDb.phone(this,index));
                     if(recipient.isEmpty()){
                         QueueDb.status(this,index,provider,"failed");
+                        QueueDb.put(this,"direct_service_state",
+                                provider+": skipped one invalid recipient; continuing");
+                        nextWait=Math.min(nextWait,1000L);
                         continue;
                     }
                     String content=QueueDb.get(this,"direct_text","");
@@ -140,9 +143,9 @@ public final class DirectQueueService extends Service {
                         } catch(RubikaPeerResolver.ResolveException error) {
                             if(error.terminal) {
                                 QueueDb.status(this,index,provider,"failed");
-                                QueueDb.due(this,provider,System.currentTimeMillis()+1500L);
                                 QueueDb.put(this,"direct_service_state",
                                         "rubika: skipped one recipient without a usable user GUID");
+                                nextWait=Math.min(nextWait,1200L);
                             } else {
                                 pauseProvider(provider,"Recipient GUID resolution unavailable");
                             }
@@ -244,7 +247,7 @@ public final class DirectQueueService extends Service {
                     QueueDb.put(this,"direct_service_state","All selected queues completed");
                     break;
                 }
-                if(running.get()&&!submitted)Thread.sleep(Math.min(30_000,Math.max(1500,nextWait)));
+                if(running.get()&&!submitted)Thread.sleep(Math.min(30_000,Math.max(750,nextWait)));
             }
         }catch(InterruptedException ignored){
             Thread.currentThread().interrupt();
