@@ -79,12 +79,12 @@ final class RubikaPeerResolver {
         }
 
         if (guid.isEmpty()) {
-            if ("failed".equals(state)) {
+            if ("failed".equals(state) || "succeeded".equals(state)) {
                 String error = reply.result().optString("error_message", "");
                 throw new ResolveException(
-                        error.isEmpty() ? "این شماره به کاربر روبیکا resolve نشد" : error, true);
+                        error.isEmpty() ? "این شماره user_guid قابل‌ارسال در روبیکا ندارد" : error, true);
             }
-            throw new ResolveException("Rubika برای این شماره user_guid معتبر برنگرداند", false);
+            throw new ResolveException("نتیجه تبدیل شماره به GUID نامشخص ماند", false);
         }
 
         if (!guid.matches("^u0[A-Za-z0-9]{1,126}$")) {
