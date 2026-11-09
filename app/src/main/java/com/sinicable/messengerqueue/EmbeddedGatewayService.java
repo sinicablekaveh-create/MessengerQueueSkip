@@ -60,7 +60,7 @@ public final class EmbeddedGatewayService extends Service {
     static int port() {
         switch (BuildConfig.TARGET_CHANNEL) {
             case "bale": return 38741;
-            case "rubika": return 39742;
+            case "rubika": return 40742;
             case "eitaa": return 38743;
             default: throw new IllegalStateException("This flavor has no embedded personal gateway");
         }
@@ -86,8 +86,8 @@ public final class EmbeddedGatewayService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
-                .setContentTitle("THREE IB | حساب شخصی")
-                .setContentText("درگاه ورود بله، روبیکا و ایتا در حال اجراست")
+                .setContentTitle("THREE IB | Rubika Direct")
+                .setContentText("درگاه مستقل Rubika Direct در حال اجراست")
                 .setOngoing(true).setContentIntent(pending).build();
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFY, notification,
                 android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
