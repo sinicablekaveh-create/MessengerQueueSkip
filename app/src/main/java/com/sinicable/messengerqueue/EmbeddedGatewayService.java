@@ -60,7 +60,7 @@ public final class EmbeddedGatewayService extends Service {
     static int port() {
         switch (BuildConfig.TARGET_CHANNEL) {
             case "bale": return 38741;
-            case "rubika": return 39742;
+            case "rubika": return 40742;
             case "eitaa": return 38743;
             default: throw new IllegalStateException("This flavor has no embedded personal gateway");
         }
