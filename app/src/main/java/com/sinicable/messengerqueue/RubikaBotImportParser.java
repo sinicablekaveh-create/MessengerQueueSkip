@@ -24,7 +24,7 @@ final class RubikaBotImportParser {
         Result out=new Result(); Set<String> seen=new HashSet<>();
         for(Map<String,String> row:rows){
             String id=safe(row.get("chat_id")).trim();
-            if(id.isEmpty()||id.length()>160||!id.matches("[A-Za-z0-9_\-:.]+")){out.invalid++;continue;}
+            if(id.isEmpty()||id.length()>160||!id.matches("[A-Za-z0-9_.:-]+")){out.invalid++;continue;}
             if(!truthy(row.get("opt_in"))){out.blocked++;continue;}
             if(!seen.add(id)){out.duplicate++;continue;}
             out.rows.add(new Row(row.get("name"),id));
