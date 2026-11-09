@@ -167,6 +167,10 @@ public final class SmsOnlyActivity extends Activity {
     }
 
     private void chooseSim() {
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)) {
+            toast("این دستگاه قابلیت ارسال SMS سیم‌کارتی ندارد");
+            return;
+        }
         if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{android.Manifest.permission.READ_PHONE_STATE}, PERMISSIONS);
             return;
@@ -197,6 +201,10 @@ public final class SmsOnlyActivity extends Activity {
     }
 
     private void startSms() {
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)) {
+            toast("قابلیت Telephony Messaging روی این دستگاه موجود نیست");
+            return;
+        }
         if (!consent.isChecked()) { toast("تأیید رضایت گیرندگان ضروری است"); return; }
         String body = message.getText().toString().trim();
         if (body.isEmpty()) { toast("متن پیامک را وارد کن"); return; }
