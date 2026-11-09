@@ -34,6 +34,12 @@ public final class RubikaSimpleActivity extends Activity {
     private static final String PROVIDER="rubika";
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final Handler ui=new Handler(Looper.getMainLooper());
+    private final Runnable queuePoll=new Runnable(){
+        @Override public void run(){
+            refreshQueue("وضعیت زنده");
+            ui.postDelayed(this,1500L);
+        }
+    };
 
     private EditText phone,code,password,message,minutes,testPhone;
     private CheckBox confirmation,testOwned,useImage;
@@ -510,23 +516,27 @@ public final class RubikaSimpleActivity extends Activity {
         try{delay=Integer.parseInt(minutes.getText().toString().trim());}catch(Exception e){delay=0;}
         if(delay<1||delay>1440){toast("فاصله باید ۱ تا ۱۴۴۰ دقیقه باشد");return;}
         final int selectedDelay=delay;
-        network("بررسی کامل و START",()->{
-            String ready=preflight();
-            ui.post(()->preflightState.setText("آمادگی: "+ready));
-
-            QueueDb.put(this,"direct_text",text);
-            QueueDb.put(this,"direct_image_enabled",image?"1":"0");
-            QueueDb.put(this,"delay_rubika",String.valueOf(selectedDelay));
-            QueueDb.put(this,"direct_selected_bale","0");
-            QueueDb.put(this,"direct_selected_rubika","1");
-            QueueDb.put(this,"direct_selected_eitaa","0");
-            QueueDb.put(this,"direct_running","1");
-            Intent service=new Intent(this,DirectQueueService.class);
-            service.setAction(DirectQueueService.ACTION_START);
+        if(QueueDb.directCount(this,PROVIDER,"pending")==0){
+            toast("ردیف در انتظار ارسال وجود ندارد");return;
+        }
+        QueueDb.put(this,"direct_text",text);
+        QueueDb.put(this,"direct_image_enabled",image?"1":"0");
+        QueueDb.put(this,"delay_rubika",String.valueOf(selectedDelay));
+        QueueDb.put(this,"direct_selected_bale","0");
+        QueueDb.put(this,"direct_selected_rubika","1");
+        QueueDb.put(this,"direct_selected_eitaa","0");
+        QueueDb.put(this,"direct_service_state","START requested by user");
+        Intent service=new Intent(this,DirectQueueService.class);
+        service.setAction(DirectQueueService.ACTION_START);
+        try{
             startForegroundService(service);
-            ui.post(()->refreshQueue("START RUBIKA ثبت شد"));
-            return "صف روبیکا شروع شد";
-        });
+            refreshQueue("START RUBIKA اجرا شد");
+        }catch(Exception error){
+            QueueDb.put(this,"direct_running","0");
+            QueueDb.put(this,"direct_selected_rubika","0");
+            toast("شروع سرویس صف ناموفق بود: "+safeError(error));
+            refreshQueue("START ناموفق");
+        }
     }
     private void stopQueue(){
         Intent i=new Intent(this,DirectQueueService.class);
@@ -543,11 +553,26 @@ public final class RubikaSimpleActivity extends Activity {
         refreshQueue("موارد ارسال‌نشده پاک شدند؛ Submitted/Review حفظ شد");
     }
     private void refreshQueue(String note){
-        if(queueState!=null)queueState.setText(note+"\nدر انتظار: "+QueueDb.directCount(this,PROVIDER,"pending")+
+        if(queueState!=null)queueState.setText(note+
+                "\nسرویس: "+QueueDb.get(this,"direct_service_state","idle")+
+                "\nدر انتظار: "+QueueDb.directCount(this,PROVIDER,"pending")+
                 " | Submitted: "+QueueDb.directCount(this,PROVIDER,"submitted")+
                 " | Review: "+QueueDb.directCount(this,PROVIDER,"review")+
                 " | Failed: "+QueueDb.directCount(this,PROVIDER,"failed"));
     }
+    @Override protected void onResume(){
+        super.onResume();
+        ui.removeCallbacks(queuePoll);
+        ui.post(queuePoll);
+    }
+    @Override protected void onPause(){
+        ui.removeCallbacks(queuePoll);
+        super.onPause();
+    }
     private void toast(String value){Toast.makeText(this,value,Toast.LENGTH_LONG).show();}
-    @Override protected void onDestroy(){worker.shutdownNow();super.onDestroy();}
+    @Override protected void onDestroy(){
+        ui.removeCallbacks(queuePoll);
+        worker.shutdownNow();
+        super.onDestroy();
+    }
 }
