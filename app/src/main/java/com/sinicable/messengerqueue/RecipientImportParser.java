@@ -55,7 +55,7 @@ final class RecipientImportParser {
     static Result read(InputStream stream, String filename, boolean smsDedicated) throws Exception {
         if(stream==null)throw new IllegalArgumentException("File is not readable");
         String name=filename==null?"":filename.toLowerCase(Locale.ROOT);
-        List<Map<String,String>> rows=name.endsWith(".xlsx")?xlsx(stream):csv(stream);
+        List<Map<String,String>> rows=name.endsWith(".xlsx")?xlsx(stream,smsDedicated):csv(stream,smsDedicated);
         return normalize(rows,smsDedicated);
     }
 
@@ -66,14 +66,13 @@ final class RecipientImportParser {
             String phone=phone(row.get("phone"));
             if(phone.isEmpty()) {result.invalidRows++;continue;}
             if(!seen.add(phone)) {result.duplicateRows++;continue;}
-            boolean twoColumn=row.containsKey("name")&&!row.containsKey("opt_in");
             String contactName=safe(row.get("name")).trim();
             if(contactName.isEmpty())contactName="بدون نام";
-            // Compact files are user-supplied; START still requires explicit consent confirmation.
-            // The presence of a number is not independent proof of recipient permission.
-            boolean optIn=twoColumn||truthy(row.get("opt_in"));
-            boolean sendSms=truthy(row.get("send_sms"))||(twoColumn&&smsDedicated);
-            String source=twoColumn?"user-attestation-required-at-start":safe(row.get("opt_in_source")).trim();
+            // Standalone SMS-simple mode accepts the selected file as the user-managed recipient list.
+            // START still requires an explicit on-screen attestation before any send begins.
+            boolean optIn=smsDedicated||truthy(row.get("opt_in"));
+            boolean sendSms=smsDedicated||truthy(row.get("send_sms"));
+            String source=smsDedicated?"user-attestation-required-at-start":safe(row.get("opt_in_source")).trim();
             if(source.isEmpty())source="imported-row";
             if(!optIn)result.blockedRows++;
             result.recipients.add(new Recipient(contactName,phone,optIn,source,sendSms,safe(row.get("message"))));
@@ -81,7 +80,7 @@ final class RecipientImportParser {
         return result;
     }
 
-    private static List<Map<String,String>> csv(InputStream stream) throws Exception {
+    private static List<Map<String,String>> csv(InputStream stream,boolean smsDedicated) throws Exception {
         List<Map<String,String>> out=new ArrayList<>();
         try(BufferedReader br=new BufferedReader(new InputStreamReader(stream,StandardCharsets.UTF_8))) {
             String headerLine=br.readLine();
@@ -98,7 +97,7 @@ final class RecipientImportParser {
                 if("opt_in".equals(h))optIn=true;
                 if("name".equals(h))contactName=true;
             }
-            if(!phone||(!optIn&&!contactName))throw new IllegalArgumentException("Required headers: name,phone OR phone,opt_in");
+            if(!phone||(!smsDedicated&&!optIn&&!contactName))throw new IllegalArgumentException("Required header: phone; non-SMS imports also require name or opt_in");
 
             String line;
             int rowCount=0;
@@ -155,7 +154,7 @@ final class RecipientImportParser {
         return out;
     }
 
-    private static List<Map<String,String>> xlsx(InputStream stream) throws Exception {
+    private static List<Map<String,String>> xlsx(InputStream stream,boolean smsDedicated) throws Exception {
         byte[] shared=null,sheet=null;
         try(ZipInputStream zip=new ZipInputStream(stream)) {
             ZipEntry entry;
@@ -197,7 +196,7 @@ final class RecipientImportParser {
                     if("opt_in".equals(h))optIn=true;
                 if("name".equals(h))contactName=true;
                 }
-                if(!phone||(!optIn&&!contactName))throw new IllegalArgumentException("Required headers: name,phone OR phone,opt_in");
+                if(!phone||(!smsDedicated&&!optIn&&!contactName))throw new IllegalArgumentException("Required header: phone; non-SMS imports also require name or opt_in");
                 continue;
             }
             Map<String,String> row=new HashMap<>();
