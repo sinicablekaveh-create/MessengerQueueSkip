@@ -267,17 +267,29 @@ public final class DirectQueueService extends Service {
                         ||"unknown".equals(phase))break;
             }
         }
-        if(!reply.success() || !"succeeded".equals(reply.result().optString("state",""))){
+        String finalPhase=reply.result().optString("state","");
+        if("failed".equals(finalPhase))return null;
+        if(!reply.success() || !"succeeded".equals(finalPhase)){
             if(reply.http>=400&&reply.http<500&&reply.http!=409&&reply.http!=429)
                 return null;
             throw new IllegalStateException(reply.summary());
         }
-        JSONObject operationResult=reply.result().optJSONObject("result");
-        JSONObject data=operationResult==null?null:operationResult.optJSONObject("data");
-        if(data==null&&operationResult!=null){
-            Object raw=operationResult.opt("data");
+        JSONObject results=reply.result();
+        JSONObject data=results.optJSONObject("data");
+        if(data==null){
+            Object raw=results.opt("data");
             if(raw instanceof String){
                 try{data=new JSONObject((String)raw);}catch(Exception ignored){}
+            }
+        }
+        if(data==null){
+            JSONObject operationResult=results.optJSONObject("result");
+            data=operationResult==null?null:operationResult.optJSONObject("data");
+            if(data==null&&operationResult!=null){
+                Object raw=operationResult.opt("data");
+                if(raw instanceof String){
+                    try{data=new JSONObject((String)raw);}catch(Exception ignored){}
+                }
             }
         }
         String guid="";

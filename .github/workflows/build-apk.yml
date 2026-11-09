@@ -27,6 +27,32 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.9'
+          cache: true
+          cache-dependency-path: tools/goomni-go.sum
+
+      - name: Build patched Android GoOmni runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          GOOMNI="$RUNNER_TEMP/goomni"
+          rm -rf "$GOOMNI"
+          git clone --filter=blob:none https://github.com/mimalef70/goomni.git "$GOOMNI"
+          git -C "$GOOMNI" checkout a49bd704ef513ff70269dcea985f486fa0a6d1a7
+          cp "$GOOMNI/src/go.sum" tools/goomni-go.sum
+          git -C "$GOOMNI" apply "$GITHUB_WORKSPACE/tools/goomni-2.4.1-android-media.patch"
+          (
+            cd "$GOOMNI/src"
+            go test -tags purego ./infrastructure/mediafile
+            CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
+              go build -tags purego -trimpath \
+              -o "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libgoomni.so" .
+          )
+          test -s app/src/main/jniLibs/arm64-v8a/libgoomni.so
+          sha256sum app/src/main/jniLibs/arm64-v8a/libgoomni.so
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
