@@ -34,6 +34,12 @@ final class RubikaPeerResolver {
         String phone = GatewayClient.normalizedPhone(rawPhone);
         if (phone.isEmpty()) throw new ResolveException("شماره گیرنده معتبر نیست", true);
 
+        String hash = sha256(phone);
+        String cached = QueueDb.get(context, "rubika_guid_" + hash.substring(0, 24), "");
+        if (cached.matches("^u0[A-Za-z0-9]{1,126}$")) {
+            return peer(cached);
+        }
+
         String firstName = safeName(displayName);
         JSONObject body = new JSONObject();
         body.put("phone", phone);
@@ -55,7 +61,7 @@ final class RubikaPeerResolver {
             throw new ResolveException("تبدیل شماره به GUID ناموفق بود: " + reply.summary(), terminal);
         }
 
-        String guid = findUserGuid(reply.data);
+        String guid = targetUserGuid(reply.data);
         String operationId = reply.result().optString("send_id", "");
         String state = reply.result().optString("state", "");
 
@@ -71,7 +77,7 @@ final class RubikaPeerResolver {
                 } catch (Exception e) {
                     throw new ResolveException("نتیجه تبدیل شماره نامشخص ماند؛ دوباره START نزن تا وضعیت بررسی شود", false);
                 }
-                guid = findUserGuid(check.data);
+                guid = targetUserGuid(check.data);
                 state = check.result().optString("state", state);
                 if (!guid.isEmpty() || "succeeded".equals(state) || "failed".equals(state)
                         || "unknown".equals(state)) break;
@@ -91,6 +97,11 @@ final class RubikaPeerResolver {
             throw new ResolveException("GUID برگشتی روبیکا از نوع user نیست", false);
         }
 
+        QueueDb.put(context, "rubika_guid_" + hash.substring(0, 24), guid);
+        return peer(guid);
+    }
+
+    private static JSONObject peer(String guid) throws Exception {
         JSONObject peer = new JSONObject();
         peer.put("type", "user");
         peer.put("id", guid);
@@ -104,24 +115,34 @@ final class RubikaPeerResolver {
         return name;
     }
 
-    private static String findUserGuid(Object value) {
-        if (value instanceof JSONObject) {
-            JSONObject object = (JSONObject) value;
-            String direct = object.optString("user_guid", "");
-            if (direct.matches("^u0[A-Za-z0-9]{1,126}$")) return direct;
-            Iterator<String> keys = object.keys();
-            while (keys.hasNext()) {
-                String found = findUserGuid(object.opt(keys.next()));
-                if (!found.isEmpty()) return found;
-            }
-        } else if (value instanceof JSONArray) {
-            JSONArray array = (JSONArray) value;
-            for (int i = 0; i < array.length(); i++) {
-                String found = findUserGuid(array.opt(i));
-                if (!found.isEmpty()) return found;
-            }
+    private static String targetUserGuid(JSONObject envelope) {
+        if (envelope == null) return "";
+        JSONObject results = envelope.optJSONObject("results");
+        if (results == null) return "";
+
+        // Durable mutations expose the provider's public response under
+        // results.result.data. Rubika contacts.add returns the resolved contact
+        // as data.user.user_guid. Refuse to guess from unrelated GUID fields.
+        JSONObject operationResult = results.optJSONObject("result");
+        if (operationResult != null) {
+            JSONObject data = operationResult.optJSONObject("data");
+            String guid = userGuidFromData(data);
+            if (!guid.isEmpty()) return guid;
         }
-        return "";
+
+        // Some synchronous/replayed responses can surface provider data one
+        // level earlier. Accept only the same explicit user object shape.
+        String guid = userGuidFromData(results.optJSONObject("data"));
+        if (!guid.isEmpty()) return guid;
+        return userGuidFromData(results);
+    }
+
+    private static String userGuidFromData(JSONObject data) {
+        if (data == null) return "";
+        JSONObject user = data.optJSONObject("user");
+        if (user == null) return "";
+        String guid = user.optString("user_guid", "");
+        return guid.matches("^u0[A-Za-z0-9]{1,126}$") ? guid : "";
     }
 
     private static String sha256(String value) throws Exception {
