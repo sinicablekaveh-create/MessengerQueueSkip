@@ -56,7 +56,7 @@ final class TelegramEngine {
      p.databaseEncryptionKey=TelegramConfigStore.databaseKey(ctx);
      p.useMessageDatabase=true;p.useChatInfoDatabase=true;p.useFileDatabase=true;p.useSecretChats=false;
      p.useTestDc=false;p.systemLanguageCode=java.util.Locale.getDefault().toLanguageTag();
-     p.deviceModel=Build.MODEL;p.systemVersion=Build.VERSION.RELEASE;p.applicationVersion="3.2.0";
+     p.deviceModel=Build.MODEL;p.systemVersion=Build.VERSION.RELEASE;p.applicationVersion=BuildConfig.VERSION_NAME;
      request(p,this::error);
     } catch(Exception e){info="Telegram configuration or encrypted database key could not be loaded: "+e.getClass().getSimpleName();notifyUi();}
    }
@@ -92,6 +92,32 @@ final class TelegramEngine {
  }
  void pause(){running=false;info="Paused";notifyUi();}
  void resolve(boolean sent){if(busy||running)return;if(sent&&index<phones.size())index++;prefs.edit().putBoolean("inflight",false).apply();save();info="Review resolved; press START to continue";notifyUi();}
+ boolean editorIdle(){return !busy&&!running&&!prefs.getBoolean("inflight",false);}
+ String editorAdd(String raw){
+  if(!editorIdle())return "Pause queue and resolve any REVIEW first.";
+  String normalized=RecipientImportParser.phone(raw);
+  if(normalized.isEmpty())return "Invalid phone number.";
+  if(phones.contains(normalized))return "Duplicate phone number.";
+  phones.add(normalized);save();notifyUi();return "Recipient added.";
+ }
+ String editorEdit(int position,String raw){
+  if(!editorIdle())return "Pause queue and resolve any REVIEW first.";
+  if(position<index||position>=phones.size())return "Processed recipients cannot be changed.";
+  String normalized=RecipientImportParser.phone(raw);
+  if(normalized.isEmpty())return "Invalid phone number.";
+  for(int i=0;i<phones.size();i++)if(i!=position&&normalized.equals(phones.get(i)))return "Duplicate phone number.";
+  phones.set(position,normalized);save();notifyUi();return "Recipient updated.";
+ }
+ String editorRemove(int position){
+  if(!editorIdle())return "Pause queue and resolve any REVIEW first.";
+  if(position<index||position>=phones.size())return "Processed recipients cannot be removed.";
+  phones.remove(position);save();notifyUi();return "Pending recipient deleted.";
+ }
+ String editorClear(){
+  if(!editorIdle())return "Pause queue and resolve any REVIEW first.";
+  phones.subList(Math.min(index,phones.size()),phones.size()).clear();
+  save();notifyUi();return "Pending recipients cleared; attempted history retained.";
+ }
  String internationalPhone(String raw){
   String p=RecipientImportParser.phone(raw);
   if(p.startsWith("+"))return p;
@@ -106,9 +132,23 @@ final class TelegramEngine {
   busy=true; info="Finding recipient "+(index+1);notifyUi();
   TdApi.ImportContacts f=new TdApi.ImportContacts();TdApi.ImportedContact c=new TdApi.ImportedContact();c.phoneNumber=internationalPhone(phones.get(index));c.firstName="MQ "+c.phoneNumber;c.lastName="";c.note=new TdApi.FormattedText("",new TdApi.TextEntity[0]);f.contacts=new TdApi.ImportedContact[]{c};
   request(f,o->{if(o instanceof TdApi.Error){error(o);return;}long[] ids=((TdApi.ImportedContacts)o).userIds;
-   if(ids.length==0||ids[0]==0){busy=false;running=false;info="Recipient unavailable on Telegram; use Skip";notifyUi();return;}
+   if(ids.length==0||ids[0]==0){skipUnavailableRecipient();return;}
    request(new TdApi.CreatePrivateChat(ids[0],false),chat->{if(chat instanceof TdApi.Error){error(chat);return;}send(((TdApi.Chat)chat).id);});
   });
+ }
+ /** A missing Telegram account has no chat and no send attempt: safely advance the queue.
+  * Network, authorization and ambiguous send errors still stop for human review.
+  */
+ void skipUnavailableRecipient(){
+  busy=false;
+  index++;
+  next=System.currentTimeMillis()+delay;
+  prefs.edit().putInt("skipped_unavailable",
+          prefs.getInt("skipped_unavailable",0)+1).apply();
+  save();
+  info="Recipient unavailable on Telegram; skipped without sending. Next "+index+" / "+phones.size();
+  notifyUi();
+  if(running)h.postDelayed(this::step,delay);
  }
  void send(long chatId){
   if(!running){busy=false;return;}

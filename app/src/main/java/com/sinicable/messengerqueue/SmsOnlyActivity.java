@@ -50,6 +50,7 @@ public final class SmsOnlyActivity extends Activity {
         text(root, "اپ مستقل SMS. فایل اکسل دو ستونی نام و شماره تماس هم پذیرفته می‌شود؛ در START رضایت واقعی گیرندگان را تأیید کنید. هزینه پیامک طبق اپراتور است.", 13);
 
         button(root, "انتخاب Excel / CSV مخاطبان", this::pickRecipients);
+        button(root, "مدیریت مخاطبان • ایجاد، ویرایش، حذف", () -> startActivity(new Intent(this,RecipientEditorActivity.class)));
         button(root, "انتخاب سیم‌کارت", this::chooseSim);
         sim = text(root, "", 13);
 
@@ -86,6 +87,7 @@ public final class SmsOnlyActivity extends Activity {
 
         status = text(root, "", 13);
         refresh("آماده");
+        AppStyle.decorate(this,getWindow().getDecorView());
     }
 
     private TextView text(LinearLayout root, String value, int size) {

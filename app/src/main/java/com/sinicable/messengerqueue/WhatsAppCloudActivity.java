@@ -49,6 +49,7 @@ public final class WhatsAppCloudActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         int reviewCount = QueueDb.whatsappRecoverInterrupted(this);
+        QueueDb.put(this,"whatsapp_running","0");
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -75,6 +76,7 @@ public final class WhatsAppCloudActivity extends Activity {
         delayMinutes.setText(String.valueOf(QueueDb.delayMinutes(this, "WhatsApp")));
 
         button(root, "IMPORT EXCEL / CSV (shared contacts)", this::pickRecipients);
+        button(root, "مدیریت مخاطبان • ایجاد، ویرایش، حذف", () -> startActivity(new Intent(this,RecipientEditorActivity.class)));
         button(root, "REFRESH QUEUE STATUS", () -> refreshStatus("Queue status"));
         confirmConsent = new CheckBox(this);
         confirmConsent.setText("I confirm that each selected recipient consented to this WhatsApp message.");
@@ -84,17 +86,20 @@ public final class WhatsAppCloudActivity extends Activity {
         button(root, "START AUTOMATIC • WHATSAPP", this::startQueue);
         button(root, "PAUSE / STOP WHATSAPP", () -> {
             running = false;
+            QueueDb.put(this,"whatsapp_running","0");
             generation++;
             refreshStatus("Paused. Unsent rows remain pending; any active request can still complete.");
         });
         button(root, "CLEAR PENDING WHATSAPP (keep shared contacts / audit)", () -> {
             running = false;
+            QueueDb.put(this,"whatsapp_running","0");
             generation++;
             QueueDb.whatsappClear(this);
             QueueDb.due(this, "WhatsApp", 0L);
             refreshStatus("Unsent WhatsApp rows cleared. REVIEW and SUBMITTED retained.");
         });
         refreshStatus(reviewCount == 0 ? "Ready" : reviewCount + " interrupted WhatsApp attempt(s) require REVIEW.");
+        AppStyle.decorate(this,getWindow().getDecorView());
     }
 
     private EditText field(LinearLayout root, String hint, int type) {
@@ -158,6 +163,7 @@ public final class WhatsAppCloudActivity extends Activity {
         }
         QueueDb.put(this, "delay_whatsapp", String.valueOf(minutes));
         running = true;
+        QueueDb.put(this,"whatsapp_running","1");
         generation++;
         dispatch(url, token, text, minutes * 60_000L, generation);
     }
@@ -173,6 +179,7 @@ public final class WhatsAppCloudActivity extends Activity {
         int rowIndex = QueueDb.next(this, "WhatsApp");
         if (rowIndex < 0) {
             running = false;
+            QueueDb.put(this,"whatsapp_running","0");
             refreshStatus("No pending WhatsApp rows remain.");
             return;
         }
@@ -192,6 +199,7 @@ public final class WhatsAppCloudActivity extends Activity {
         // Do not send unless the durable IN_FLIGHT write has succeeded.
         if (!QueueDb.whatsappMarkInFlight(this, rowIndex)) {
             running = false;
+            QueueDb.put(this,"whatsapp_running","0");
             refreshStatus("Cannot persist IN_FLIGHT. No request was sent.");
             return;
         }
@@ -249,6 +257,7 @@ public final class WhatsAppCloudActivity extends Activity {
                     dispatch(url, token, text, delayMillis, run);
                 } else {
                     running = false;
+            QueueDb.put(this,"whatsapp_running","0");
                     refreshStatus("Stopped at " + finalOutcome.toUpperCase()
                             + ". Check backend logs before any manual requeue.");
                 }
@@ -287,6 +296,7 @@ public final class WhatsAppCloudActivity extends Activity {
 
     @Override protected void onDestroy() {
         running = false;
+            QueueDb.put(this,"whatsapp_running","0");
         generation++;
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
